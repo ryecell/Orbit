@@ -6,6 +6,7 @@ from typing import List, Optional
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -45,6 +46,26 @@ if not _redis_url:
     logger.info("REDIS_URL not set — rate limiting is in-memory (per process only).")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Without this, an unhandled exception falls through to Starlette's
+    default ServerErrorMiddleware, which sits OUTSIDE CORSMiddleware in the
+    stack — so its response never gets CORS headers added. The browser then
+    reports it as a CORS failure ("No Access-Control-Allow-Origin header"),
+    which is misleading: the real problem is a server crash, not CORS. This
+    handler runs INSIDE the CORS layer instead, so error responses get
+    proper CORS headers, a clean JSON body instead of a raw traceback, and
+    get logged / sent to Sentry if configured.
+    """
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    if SENTRY_DSN:
+        import sentry_sdk as _sentry_sdk
+
+        _sentry_sdk.capture_exception(exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 # --- CORS ----------------------------------------------------------------------
 # Default to the local Vite dev server only — NOT a wildcard — so a forgotten
