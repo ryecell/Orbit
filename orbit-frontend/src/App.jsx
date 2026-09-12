@@ -233,6 +233,94 @@ function AuthScreen({ onAuthed }) {
   );
 }
 
+function VerifyPendingScreen({ user, onVerified, onLogout }) {
+  const [resendState, setResendState] = useState("idle"); // idle | sending | sent
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+
+  // Poll in the background so the screen advances on its own the moment the
+  // person clicks the link in their email — no manual "I've verified" click
+  // needed, though we still offer one below in case polling is slow/blocked.
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const fresh = await api.me();
+        if (fresh.is_verified) onVerified(fresh);
+      } catch {
+        // Ignore transient errors during polling — the manual check button
+        // and the next tick will retry.
+      }
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [onVerified]);
+
+  async function checkNow() {
+    setChecking(true);
+    setError("");
+    try {
+      const fresh = await api.me();
+      if (fresh.is_verified) {
+        onVerified(fresh);
+      } else {
+        setError("Not verified yet — click the link in the email first, then try again.");
+      }
+    } catch (err) {
+      setError(err.message || "Couldn't check verification status.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function resend() {
+    setResendState("sending");
+    setError("");
+    try {
+      await api.resendVerification();
+      setResendState("sent");
+    } catch (err) {
+      setError(err.message || "Couldn't resend the email.");
+      setResendState("idle");
+    }
+  }
+
+  return (
+    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", textAlign: "center" }}>
+      <div style={{ width: 64, height: 64, borderRadius: 18, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 22 }}>
+        <Mail size={28} color={T.primary} />
+      </div>
+
+      <h2 style={{ fontSize: 18, fontWeight: 800, color: T.ink, margin: "0 0 8px" }}>Check your email</h2>
+      <p style={{ fontSize: 13.5, color: T.inkSoft, lineHeight: 1.6, margin: "0 0 4px" }}>
+        We sent a confirmation link to
+      </p>
+      <p style={{ fontSize: 14, fontWeight: 700, color: T.ink, margin: "0 0 22px" }}>{user.email}</p>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, color: T.inkFaint, fontSize: 12.5, marginBottom: 26 }}>
+        <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} />
+        Waiting for confirmation…
+      </div>
+
+      {error && <div style={{ width: "100%", marginBottom: 14 }}><ErrorBanner message={error} /></div>}
+
+      <button onClick={checkNow} disabled={checking} style={{ ...primaryBtn, width: "100%", opacity: checking ? 0.6 : 1 }}>
+        {checking ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "I've verified — check now"}
+      </button>
+
+      <button onClick={resend} disabled={resendState === "sending"} style={{ ...secondaryBtn, width: "100%", marginTop: 10, opacity: resendState === "sending" ? 0.6 : 1 }}>
+        {resendState === "sending" ? "Sending…" : resendState === "sent" ? "Email sent again ✓" : "Resend confirmation email"}
+      </button>
+
+      <span onClick={onLogout} style={{ marginTop: 22, fontSize: 12.5, color: T.inkFaint, cursor: "pointer", textDecoration: "underline" }}>
+        Sign out
+      </span>
+
+      <div style={{ marginTop: 26, fontSize: 11, color: T.inkFaint }}>
+        Connecting to <code>{api.base}</code>
+      </div>
+    </div>
+  );
+}
+
 /* --------------------------------- SCREENS ------------------------------------ */
 
 function HomeScreen({ folders, tasks, go, user }) {
@@ -704,17 +792,6 @@ function RemindersScreen({ back, reminders, onAdd }) {
 }
 
 function ProfileScreen({ back, user, onLogout }) {
-  const [resendState, setResendState] = useState("idle"); // idle | sending | sent
-  async function resend() {
-    setResendState("sending");
-    try {
-      await api.resendVerification();
-      setResendState("sent");
-    } catch {
-      setResendState("idle");
-    }
-  }
-
   const premium = [
     { icon: Mic, title: "Voice Commands", desc: "\u201cArchive this under Biology.\u201d" },
     { icon: LayoutGrid, title: "Home Screen Widgets", desc: "Quick access to tasks, events, recent captures" },
@@ -730,23 +807,6 @@ function ProfileScreen({ back, user, onLogout }) {
           <div style={{ width: 50, height: 50, borderRadius: 999, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", color: T.primary, fontWeight: 800, fontSize: 18 }}>{user.name[0]}</div>
           <div><div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>{user.name}</div><div style={{ fontSize: 12.5, color: T.inkFaint }}>{user.email}</div></div>
         </div>
-
-        {!user.is_verified && (
-          <div style={{ ...rowCardStyle, alignItems: "flex-start", flexDirection: "column", gap: 8, background: "#FFF8E8", borderColor: "#F2DFA8" }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <AlertCircle size={16} color="#B8860B" />
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#8A6300" }}>Email not verified</span>
-            </div>
-            <div style={{ fontSize: 12, color: "#8A6300" }}>
-              {resendState === "sent" ? "Verification link sent — check the backend console (no email service is wired up yet)." : "Verify your email to secure your account."}
-            </div>
-            {resendState !== "sent" && (
-              <button onClick={resend} disabled={resendState === "sending"} style={{ ...secondaryBtn, padding: "8px 14px", fontSize: 12.5 }}>
-                {resendState === "sending" ? "Sending…" : "Resend verification link"}
-              </button>
-            )}
-          </div>
-        )}
 
         <div onClick={onLogout} style={{ ...rowCardStyle, cursor: "pointer" }}>
           <LogOut size={17} color={T.danger} />
@@ -924,5 +984,6 @@ export default function App() {
 
   if (checking) return <CenterSpinner label="Checking your session…" />;
   if (!user) return <AuthScreen onAuthed={setUser} />;
+  if (!user.is_verified) return <VerifyPendingScreen user={user} onVerified={setUser} onLogout={handleLogout} />;
   return <MainShell user={user} onLogout={handleLogout} />;
 }
