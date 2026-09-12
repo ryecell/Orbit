@@ -61,6 +61,11 @@ else:
         "server only (http://localhost:5173). Set it explicitly for any other frontend origin."
     )
 
+# Diagnostic: prints the exact parsed list on every startup, so a CORS
+# mismatch can be confirmed by reading logs instead of guessing whether the
+# env var actually took effect, has a typo, or has hidden whitespace.
+print(f"[orbit] CORS allowed origins (parsed): {allowed_origins!r}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
