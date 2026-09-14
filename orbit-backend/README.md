@@ -59,6 +59,7 @@ export SMTP_USER="..."
 export SMTP_PASSWORD="..."
 export SMTP_FROM="no-reply@yourdomain.com"
 export ORBIT_PUBLIC_API_URL="https://api.yourdomain.com"   # used to build the verify link
+export ORBIT_PUBLIC_FRONTEND_URL="https://yourapp.vercel.app"  # used to build the password-reset link
 ```
 
 Plain SMTP (stdlib `smtplib`, no vendor SDK) so this works unmodified with
@@ -105,6 +106,8 @@ that itself.
 | POST   | `/auth/logout`                | Revokes the current token       |
 | GET    | `/auth/verify?token=...`      | Marks the account verified      |
 | POST   | `/auth/resend-verification`   | Re-sends the verification email |
+| POST   | `/auth/forgot-password`       | Always returns a generic response, emails a reset link if the account exists |
+| POST   | `/auth/reset-password`        | Sets a new password from a valid reset token; invalidates existing sessions |
 | GET    | `/me`                         | Current user                    |
 | GET/POST | `/folders`                  | List / create folders           |
 | POST   | `/folders/{id}/items`         | Add an archive item             |

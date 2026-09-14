@@ -157,17 +157,34 @@ function QuickAction({ icon: Icon, label, onClick }) {
 /* --------------------------------- AUTH SCREEN --------------------------------- */
 
 function AuthScreen({ onAuthed }) {
-  const [mode, setMode] = useState("login"); // login | register
+  const [mode, setMode] = useState("login"); // login | register | forgot
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
     setLoading(true);
     setError("");
+
+    if (mode === "forgot") {
+      try {
+        await api.forgotPassword({ email });
+        setForgotSent(true);
+      } catch (err) {
+        // Still show the generic success state — the backend already
+        // returns a generic message either way, so a thrown error here
+        // is a genuine network/server problem, worth surfacing distinctly.
+        setError(err.message || "Something went wrong. Is the backend running?");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
       const payload = mode === "login" ? { email, password } : { name, email, password };
       const data = mode === "login" ? await api.login(payload) : await api.register(payload);
@@ -175,6 +192,118 @@ function AuthScreen({ onAuthed }) {
       onAuthed(data.user);
     } catch (err) {
       setError(err.message || "Something went wrong. Is the backend running?");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function switchMode(next) {
+    setMode(next);
+    setError("");
+    setForgotSent(false);
+  }
+
+  return (
+    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 30 }}>
+        <div style={{ width: 42, height: 42, borderRadius: 12, background: T.primary, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <OrbitIcon size={22} color="#fff" />
+        </div>
+        <span style={{ fontWeight: 800, fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>ORBIT</span>
+      </div>
+
+      <h2 style={{ textAlign: "center", fontSize: 17, fontWeight: 700, color: T.ink, margin: "0 0 4px" }}>
+        {mode === "login" ? "Welcome back" : mode === "register" ? "Create your account" : "Reset your password"}
+      </h2>
+      <p style={{ textAlign: "center", fontSize: 12.5, color: T.inkFaint, margin: "0 0 22px" }}>
+        {mode === "login" ? "Sign in to access your archive" : mode === "register" ? "Start organizing everything in one place" : "We'll email you a link to choose a new one"}
+      </p>
+
+      {mode === "forgot" && forgotSent ? (
+        <div style={{ textAlign: "center" }}>
+          <div style={{ background: T.primarySoft, border: `1px solid #DCD3F8`, borderRadius: 14, padding: "16px 18px", fontSize: 13.5, color: T.ink, lineHeight: 1.6 }}>
+            If an account exists for <strong>{email}</strong>, a reset link is on its way. Check your inbox.
+          </div>
+          <span onClick={() => switchMode("login")} style={{ display: "inline-block", marginTop: 18, color: T.primary, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+            Back to sign in
+          </span>
+        </div>
+      ) : (
+        <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {mode === "register" && (
+            <div>
+              <FieldLabel icon={User}>Full name</FieldLabel>
+              <input value={name} onChange={(e) => setName(e.target.value)} required style={inputStyle} placeholder="Alex Morgan" />
+            </div>
+          )}
+          <div>
+            <FieldLabel icon={Mail}>Email</FieldLabel>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={inputStyle} placeholder="you@school.edu" />
+          </div>
+
+          {mode !== "forgot" && (
+            <div>
+              <FieldLabel icon={KeyRound}>Password</FieldLabel>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} style={inputStyle} placeholder="At least 8 characters" />
+            </div>
+          )}
+
+          {mode === "login" && (
+            <span onClick={() => switchMode("forgot")} style={{ alignSelf: "flex-end", fontSize: 12.5, color: T.inkSoft, cursor: "pointer", marginTop: -4 }}>
+              Forgot password?
+            </span>
+          )}
+
+          <ErrorBanner message={error} />
+
+          <button type="submit" disabled={loading} style={{ ...primaryBtn, opacity: loading ? 0.6 : 1, marginTop: 6 }}>
+            {loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : (mode === "login" ? "Sign in" : mode === "register" ? "Create account" : "Send reset link")}
+          </button>
+        </form>
+      )}
+
+      {!(mode === "forgot" && forgotSent) && (
+        <div style={{ textAlign: "center", marginTop: 18, fontSize: 13, color: T.inkSoft }}>
+          {mode === "forgot" ? (
+            <span onClick={() => switchMode("login")} style={{ color: T.primary, fontWeight: 700, cursor: "pointer" }}>Back to sign in</span>
+          ) : (
+            <>
+              {mode === "login" ? "New to Orbit?" : "Already have an account?"}{" "}
+              <span onClick={() => switchMode(mode === "login" ? "register" : "login")} style={{ color: T.primary, fontWeight: 700, cursor: "pointer" }}>
+                {mode === "login" ? "Create an account" : "Sign in"}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      <div style={{ textAlign: "center", marginTop: 26, fontSize: 11, color: T.inkFaint }}>
+        Connecting to <code>{api.base}</code>
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordScreen({ token, onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError("");
+    if (password !== confirm) {
+      setError("Passwords don't match.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.resetPassword({ token, new_password: password });
+      setDone(true);
+    } catch (err) {
+      setError(err.message || "This reset link may have expired. Request a new one.");
     } finally {
       setLoading(false);
     }
@@ -189,46 +318,32 @@ function AuthScreen({ onAuthed }) {
         <span style={{ fontWeight: 800, fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>ORBIT</span>
       </div>
 
-      <h2 style={{ textAlign: "center", fontSize: 17, fontWeight: 700, color: T.ink, margin: "0 0 4px" }}>
-        {mode === "login" ? "Welcome back" : "Create your account"}
-      </h2>
-      <p style={{ textAlign: "center", fontSize: 12.5, color: T.inkFaint, margin: "0 0 22px" }}>
-        {mode === "login" ? "Sign in to access your archive" : "Start organizing everything in one place"}
-      </p>
-
-      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {mode === "register" && (
-          <div>
-            <FieldLabel icon={User}>Full name</FieldLabel>
-            <input value={name} onChange={(e) => setName(e.target.value)} required style={inputStyle} placeholder="Alex Morgan" />
-          </div>
-        )}
-        <div>
-          <FieldLabel icon={Mail}>Email</FieldLabel>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={inputStyle} placeholder="you@school.edu" />
+      {done ? (
+        <div style={{ textAlign: "center" }}>
+          <h2 style={{ fontSize: 17, fontWeight: 700, color: T.ink, margin: "0 0 8px" }}>Password updated</h2>
+          <p style={{ fontSize: 13.5, color: T.inkSoft, marginBottom: 20 }}>Sign in with your new password.</p>
+          <button onClick={onDone} style={primaryBtn}>Go to sign in</button>
         </div>
-        <div>
-          <FieldLabel icon={KeyRound}>Password</FieldLabel>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} style={inputStyle} placeholder="At least 8 characters" />
-        </div>
-
-        <ErrorBanner message={error} />
-
-        <button type="submit" disabled={loading} style={{ ...primaryBtn, opacity: loading ? 0.6 : 1, marginTop: 6 }}>
-          {loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : (mode === "login" ? "Sign in" : "Create account")}
-        </button>
-      </form>
-
-      <div style={{ textAlign: "center", marginTop: 18, fontSize: 13, color: T.inkSoft }}>
-        {mode === "login" ? "New to Orbit?" : "Already have an account?"}{" "}
-        <span onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }} style={{ color: T.primary, fontWeight: 700, cursor: "pointer" }}>
-          {mode === "login" ? "Create an account" : "Sign in"}
-        </span>
-      </div>
-
-      <div style={{ textAlign: "center", marginTop: 26, fontSize: 11, color: T.inkFaint }}>
-        Connecting to <code>{api.base}</code>
-      </div>
+      ) : (
+        <>
+          <h2 style={{ textAlign: "center", fontSize: 17, fontWeight: 700, color: T.ink, margin: "0 0 4px" }}>Choose a new password</h2>
+          <p style={{ textAlign: "center", fontSize: 12.5, color: T.inkFaint, margin: "0 0 22px" }}>Must be at least 8 characters, with a letter and a number</p>
+          <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <FieldLabel icon={KeyRound}>New password</FieldLabel>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} style={inputStyle} placeholder="At least 8 characters" />
+            </div>
+            <div>
+              <FieldLabel icon={KeyRound}>Confirm password</FieldLabel>
+              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={8} style={inputStyle} placeholder="Type it again" />
+            </div>
+            <ErrorBanner message={error} />
+            <button type="submit" disabled={loading} style={{ ...primaryBtn, opacity: loading ? 0.6 : 1, marginTop: 6 }}>
+              {loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Update password"}
+            </button>
+          </form>
+        </>
+      )}
     </div>
   );
 }
@@ -968,6 +1083,7 @@ function MainShell({ user, onLogout }) {
 export default function App() {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
+  const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("resetToken"));
 
   useEffect(() => {
     const token = api.getToken();
@@ -982,6 +1098,16 @@ export default function App() {
     });
   }
 
+  function clearResetToken() {
+    setResetToken(null);
+    // Drop ?resetToken=... from the address bar without a full reload, so
+    // refreshing afterward doesn't re-trigger the reset screen.
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+
+  // Checked before auth state on purpose — someone clicking a reset link
+  // isn't necessarily logged in, and shouldn't need to be.
+  if (resetToken) return <ResetPasswordScreen token={resetToken} onDone={clearResetToken} />;
   if (checking) return <CenterSpinner label="Checking your session…" />;
   if (!user) return <AuthScreen onAuthed={setUser} />;
   if (!user.is_verified) return <VerifyPendingScreen user={user} onVerified={setUser} onLogout={handleLogout} />;

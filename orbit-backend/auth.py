@@ -44,6 +44,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 FAILED_LOGIN_LIMIT = 5
 LOCKOUT_MINUTES = 15
 VERIFICATION_TOKEN_HOURS = 24
+PASSWORD_RESET_TOKEN_MINUTES = 30
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -59,10 +60,14 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    now = datetime.utcnow()
+    expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     # jti (JWT ID) gives each token a unique identifier so a specific token
     # can be revoked on logout without invalidating every other session.
-    to_encode.update({"exp": expire, "jti": secrets.token_urlsafe(16)})
+    # iat (issued at) lets us invalidate every token issued before a given
+    # moment — used when a password is reset, so an old leaked token can't
+    # keep working just because it hasn't technically expired yet.
+    to_encode.update({"exp": expire, "iat": int(now.timestamp()), "jti": secrets.token_urlsafe(16)})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -92,6 +97,7 @@ def get_current_user(
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         jti: str = payload.get("jti")
+        iat: int = payload.get("iat")
         if user_id is None:
             raise credentials_exception
     except JWTError:
@@ -103,6 +109,11 @@ def get_current_user(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if user is None:
         raise credentials_exception
+
+    if user.sessions_invalidated_at and iat:
+        if datetime.utcfromtimestamp(iat) < user.sessions_invalidated_at:
+            raise credentials_exception  # issued before a password reset — treat as stale
+
     return user
 
 
@@ -112,24 +123,27 @@ def generate_verification_token() -> tuple[str, datetime]:
     return token, expires
 
 
-def send_verification_email(email: str, token: str) -> None:
+def generate_password_reset_token() -> tuple[str, datetime]:
+    token = secrets.token_urlsafe(32)
+    # Deliberately much shorter-lived than email verification — this token
+    # grants a full account takeover if intercepted, not just a "verified"
+    # flag, so it should be usable for minutes, not a full day.
+    expires = datetime.utcnow() + timedelta(minutes=PASSWORD_RESET_TOKEN_MINUTES)
+    return token, expires
+
+
+def _send_email(to_email: str, subject: str, body: str, fallback_label: str, fallback_url: str) -> None:
     """
+    Shared SMTP sender used by both verification and password-reset emails.
     Sends via SMTP if configured, otherwise prints the link so development
-    still works with zero setup. SMTP (not a vendor-specific SDK) is used
-    deliberately — it works unmodified with SES, Postmark, SendGrid,
-    Mailgun, or plain Gmail for quick testing, so there's nothing to swap
-    out later beyond the env vars.
-
-    Required env vars for real sending: SMTP_HOST, SMTP_PORT, SMTP_USER,
-    SMTP_PASSWORD, SMTP_FROM. See the README for provider-specific values.
+    still works with zero setup. Plain SMTP (not a vendor SDK) works
+    unmodified with SES, Postmark, SendGrid, Mailgun, or Gmail — see the
+    README for provider-specific values.
     """
-    public_api_url = os.environ.get("ORBIT_PUBLIC_API_URL", "http://localhost:8000")
-    verify_url = f"{public_api_url}/auth/verify?token={token}"
-
     smtp_host = os.environ.get("SMTP_HOST")
     if not smtp_host:
-        print(f"\n[orbit] SMTP_HOST not set — printing the verification link instead of emailing it.")
-        print(f"[orbit] Verification link for {email}:\n[orbit]   {verify_url}\n")
+        print(f"\n[orbit] SMTP_HOST not set — printing the {fallback_label} link instead of emailing it.")
+        print(f"[orbit] {fallback_label} link for {to_email}:\n[orbit]   {fallback_url}\n")
         return
 
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
@@ -139,15 +153,10 @@ def send_verification_email(email: str, token: str) -> None:
     use_tls = os.environ.get("SMTP_USE_TLS", "true").lower() != "false"
 
     message = EmailMessage()
-    message["Subject"] = "Verify your Orbit account"
+    message["Subject"] = subject
     message["From"] = smtp_from
-    message["To"] = email
-    message.set_content(
-        "Welcome to Orbit!\n\n"
-        f"Verify your email by opening this link:\n{verify_url}\n\n"
-        f"This link expires in {VERIFICATION_TOKEN_HOURS} hours. "
-        "If you didn't create this account, you can ignore this message."
-    )
+    message["To"] = to_email
+    message.set_content(body)
 
     try:
         with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
@@ -156,12 +165,39 @@ def send_verification_email(email: str, token: str) -> None:
             if smtp_user and smtp_password:
                 server.login(smtp_user, smtp_password)
             server.send_message(message)
-        logger.info("Sent verification email to %s", email)
+        logger.info("Sent %s email to %s", fallback_label, to_email)
     except Exception as exc:
-        # A flaky email provider shouldn't break registration — log it and
-        # fall back to printing the link so the account is still usable.
-        logger.warning("Failed to send verification email to %s: %s", email, exc)
-        print(f"[orbit] Email send failed — verification link for {email}:\n[orbit]   {verify_url}\n")
+        # A flaky email provider shouldn't break the request — log it and
+        # fall back to printing the link so the flow is still usable.
+        logger.warning("Failed to send %s email to %s: %s", fallback_label, to_email, exc)
+        print(f"[orbit] Email send failed — {fallback_label} link for {to_email}:\n[orbit]   {fallback_url}\n")
+
+
+def send_verification_email(email: str, token: str) -> None:
+    public_api_url = os.environ.get("ORBIT_PUBLIC_API_URL", "http://localhost:8000")
+    verify_url = f"{public_api_url}/auth/verify?token={token}"
+    body = (
+        "Welcome to Orbit!\n\n"
+        f"Verify your email by opening this link:\n{verify_url}\n\n"
+        f"This link expires in {VERIFICATION_TOKEN_HOURS} hours. "
+        "If you didn't create this account, you can ignore this message."
+    )
+    _send_email(email, "Verify your Orbit account", body, "verification", verify_url)
+
+
+def send_password_reset_email(email: str, token: str) -> None:
+    # This one MUST point at the frontend, not the backend — resetting a
+    # password needs a form for the person to type a new one into, unlike
+    # verification which is a one-click confirm handled entirely by the API.
+    public_frontend_url = os.environ.get("ORBIT_PUBLIC_FRONTEND_URL", "http://localhost:5173")
+    reset_url = f"{public_frontend_url}/?resetToken={token}"
+    body = (
+        "Someone requested a password reset for your Orbit account.\n\n"
+        f"Choose a new password by opening this link:\n{reset_url}\n\n"
+        f"This link expires in {PASSWORD_RESET_TOKEN_MINUTES} minutes. "
+        "If you didn't request this, you can safely ignore this message — your password won't change."
+    )
+    _send_email(email, "Reset your Orbit password", body, "password reset", reset_url)
 
 
 def is_locked(user: models.User) -> bool:

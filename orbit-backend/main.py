@@ -219,6 +219,53 @@ def logout(
     logger.info("Token revoked on logout: %s", user.email)
 
 
+@app.post("/auth/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("3/minute")
+def forgot_password(request: Request, payload: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Always returns the same generic response whether or not the email
+    exists — anything else would let someone enumerate registered accounts
+    by checking which emails trigger a different response.
+    """
+    generic_response = {"detail": "If an account exists for that email, a reset link has been sent."}
+
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    if not user:
+        return generic_response
+
+    token, expires = auth.generate_password_reset_token()
+    user.reset_token = token
+    user.reset_expires = expires
+    db.commit()
+
+    auth.send_password_reset_email(user.email, token)
+    logger.info("Password reset requested for %s", user.email)
+    return generic_response
+
+
+@app.post("/auth/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("5/minute")
+def reset_password(request: Request, payload: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.reset_token == payload.token).first()
+    if not user or not user.reset_expires or user.reset_expires < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired.")
+
+    user.hashed_password = auth.hash_password(payload.new_password)
+    user.reset_token = None
+    user.reset_expires = None
+    # Also clear any lockout — a successful reset is a legitimate way back
+    # into the account, it shouldn't stay locked from the failed attempts
+    # that led here.
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    # Invalidate every token issued before this moment, including the one
+    # in the browser that's still "logged in" from before the reset.
+    user.sessions_invalidated_at = datetime.utcnow()
+    db.commit()
+
+    logger.info("Password reset completed for %s", user.email)
+
+
 @app.get("/me", response_model=schemas.UserOut)
 def me(current_user: models.User = Depends(auth.get_current_user)):
     return current_user

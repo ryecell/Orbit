@@ -25,6 +25,16 @@ class User(Base):
     verification_token = Column(String, nullable=True)
     verification_expires = Column(DateTime, nullable=True)
 
+    # Password reset
+    reset_token = Column(String, nullable=True)
+    reset_expires = Column(DateTime, nullable=True)
+
+    # Bumped whenever the password changes; any JWT issued before this
+    # timestamp is treated as invalid, even if it hasn't technically
+    # expired yet — otherwise a stolen token would keep working after
+    # the person "secures" their account by resetting the password.
+    sessions_invalidated_at = Column(DateTime, nullable=True)
+
     # Account lockout after repeated failed logins
     failed_login_attempts = Column(Integer, default=0)
     locked_until = Column(DateTime, nullable=True)

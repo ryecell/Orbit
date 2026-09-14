@@ -40,6 +40,8 @@ export const api = {
   login: (payload) => request("/auth/login", { method: "POST", body: payload, auth: false }),
   logout: () => request("/auth/logout", { method: "POST" }),
   resendVerification: () => request("/auth/resend-verification", { method: "POST" }),
+  forgotPassword: (payload) => request("/auth/forgot-password", { method: "POST", body: payload, auth: false }),
+  resetPassword: (payload) => request("/auth/reset-password", { method: "POST", body: payload, auth: false }),
   me: () => request("/me"),
 
   folders: {
