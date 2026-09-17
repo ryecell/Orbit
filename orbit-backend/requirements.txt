@@ -1,0 +1,26 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+passlib[bcrypt]==1.7.4
+# Pinned explicitly: passlib 1.7.4 reads bcrypt's __about__.__version__ to
+# detect the backend, which newer bcrypt releases (4.1+) removed — that
+# mismatch throws an AttributeError on the very first password hash/verify
+# call (registration or login), not at import time, which is why the app
+# boots fine but crashes the moment someone actually tries to sign up.
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.9
+httpx==0.27.2
+pydantic[email]==2.9.2
+slowapi==0.1.9
+
+# Production database (Postgres) + migrations.
+psycopg2-binary==2.9.9
+alembic==1.13.3
+
+# Shared rate-limit storage once running more than one server instance.
+# Only used if REDIS_URL is set — safe to leave installed even if you don't.
+redis==5.0.8
+
+# Error monitoring — only activates if SENTRY_DSN is set.
+sentry-sdk[fastapi]==2.14.0

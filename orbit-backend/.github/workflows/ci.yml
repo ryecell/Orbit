@@ -1,0 +1,32 @@
+name: Backend CI
+
+on:
+  push:
+    paths: ["orbit-backend/**"]
+  pull_request:
+    paths: ["orbit-backend/**"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orbit-backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Byte-compile check
+        run: python -m py_compile main.py auth.py models.py schemas.py database.py
+
+      - name: Import sanity check
+        env:
+          ORBIT_SECRET_KEY: ci-test-secret-key-not-for-production
+          ORBIT_ALLOWED_ORIGINS: http://localhost:5173
+        run: python -c "import main; print('main imports cleanly')"
