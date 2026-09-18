@@ -34,24 +34,17 @@ const FOLDER_META = {
   "Personal": { color: "#0891B2", icon: User },
 };
 const FOLDER_NAMES = Object.keys(FOLDER_META);
-const DEMO_GROUP_ID = "study-group-1";
-
-// Calendar/insights have no backend model yet, so these stay illustrative.
-const weeklyStudy = [
-  { day: "Mon", hours: 1.5 }, { day: "Tue", hours: 2.2 }, { day: "Wed", hours: 1.8 },
-  { day: "Thu", hours: 3.1 }, { day: "Fri", hours: 2.4 }, { day: "Sat", hours: 2.0 }, { day: "Sun", hours: 1.5 },
-];
-const MAY_EVENTS = {
-  7: [{ t: "Math 21 Quiz", time: "10:00 – 11:00 AM", color: T.primary }],
-  15: [
-    { t: "Math 21 Quiz", time: "10:00 – 11:00 AM", color: T.primary },
-    { t: "Group Meeting", time: "2:00 – 3:00 PM", color: "#A855F7" },
-    { t: "Physics Lab", time: "4:00 – 5:30 PM", color: T.danger },
-  ],
-  20: [{ t: "Group Project Report Due", time: "11:59 PM", color: "#D68A0C" }],
-};
+const EVENT_COLORS = [T.primary, "#A855F7", "#E2456B", "#D68A0C", "#0E9F6E", "#0891B2"];
 
 /* ------------------------------- UTILITIES ---------------------------------- */
+
+function ymKey(date) { return `${date.getFullYear()}-${date.getMonth()}`; }
+function dayKey(date) { return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`; }
+function monthLabel(date) { return date.toLocaleDateString(undefined, { month: "long", year: "numeric" }); }
+function toLocalInputValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -704,13 +697,72 @@ function CaptureScreen({ back, onSave, folders }) {
   );
 }
 
-function CalendarScreen({ back }) {
-  const [selected, setSelected] = useState(15);
-  const cells = [...Array(4).fill(null), ...Array.from({ length: 31 }, (_, i) => i + 1)];
-  const events = MAY_EVENTS[selected] || [];
+function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
+  const [month, setMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
+  const [selected, setSelected] = useState(() => new Date());
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const eventsByDay = {};
+  events.forEach((ev) => {
+    const k = dayKey(new Date(ev.start_time));
+    (eventsByDay[k] = eventsByDay[k] || []).push(ev);
+  });
+
+  const firstOfMonth = new Date(month.getFullYear(), month.getMonth(), 1);
+  const startOffset = firstOfMonth.getDay();
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const cells = [...Array(startOffset).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => new Date(month.getFullYear(), month.getMonth(), i + 1))];
+  const today = new Date();
+  const dayEvents = (eventsByDay[dayKey(selected)] || []).sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+
+  function shiftMonth(delta) {
+    const d = new Date(month);
+    d.setMonth(d.getMonth() + delta);
+    setMonth(d);
+  }
+
+  function openForm() {
+    const base = new Date(selected);
+    base.setHours(base.getHours() + 1, 0, 0, 0);
+    setStart(toLocalInputValue(base));
+    const endD = new Date(base);
+    endD.setHours(endD.getHours() + 1);
+    setEnd(toLocalInputValue(endD));
+    setTitle("");
+    setError("");
+    setShowForm(true);
+  }
+
+  async function saveEvent() {
+    if (!title.trim() || !start) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onAddEvent({
+        title: title.trim(),
+        start_time: new Date(start).toISOString(),
+        end_time: end ? new Date(end).toISOString() : null,
+        color: EVENT_COLORS[events.length % EVENT_COLORS.length],
+      });
+      setShowForm(false);
+    } catch (err) {
+      setError(err.message || "Couldn't save event.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div>
-      <TopBar title="May 2025" onBack={back} />
+      <TopBar title={monthLabel(month)} onBack={back} right={<>
+        <button onClick={() => shiftMonth(-1)} style={iconBtnStyle}><ChevronLeft size={16} color={T.ink} /></button>
+        <button onClick={() => shiftMonth(1)} style={iconBtnStyle}><ChevronRight size={16} color={T.ink} /></button>
+      </>} />
       <div style={screenBox}>
         <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 16, padding: 14 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 }}>
@@ -718,25 +770,56 @@ function CalendarScreen({ back }) {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}>
             {cells.map((d, i) => {
-              const hasEvent = d && MAY_EVENTS[d];
-              const isSel = d === selected;
+              const hasEvent = d && eventsByDay[dayKey(d)];
+              const isSel = d && dayKey(d) === dayKey(selected);
+              const isToday = d && dayKey(d) === dayKey(today);
               return (
-                <div key={i} onClick={() => d && setSelected(d)} style={{ aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, fontSize: 12.5, fontWeight: isSel ? 800 : 500, cursor: d ? "pointer" : "default", background: isSel ? T.primary : "transparent", color: isSel ? "#fff" : d ? T.ink : "transparent", position: "relative" }}>
-                  {d}
+                <div key={i} onClick={() => d && setSelected(d)} style={{ aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, fontSize: 12.5, fontWeight: isSel ? 800 : 500, cursor: d ? "pointer" : "default", background: isSel ? T.primary : "transparent", color: isSel ? "#fff" : d ? T.ink : "transparent", position: "relative", border: isToday && !isSel ? `1px solid ${T.primary}` : "none" }}>
+                  {d && d.getDate()}
                   {hasEvent && !isSel && <span style={{ position: "absolute", bottom: 3, width: 4, height: 4, borderRadius: 99, background: T.primary }} />}
                 </div>
               );
             })}
           </div>
         </div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 6 }}>May {selected}, 2025</div>
-        {events.length === 0 && <div style={{ fontSize: 13, color: T.inkFaint, padding: "10px 0" }}>No events scheduled.</div>}
-        {events.map((ev, i) => (
-          <div key={i} style={rowCardStyle}>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>{selected.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</div>
+          <span onClick={openForm} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 700, color: T.primary, cursor: "pointer" }}><Plus size={14} /> Add event</span>
+        </div>
+
+        {dayEvents.length === 0 && <div style={{ fontSize: 13, color: T.inkFaint, padding: "10px 0" }}>No events scheduled.</div>}
+        {dayEvents.map((ev) => (
+          <div key={ev.id} style={rowCardStyle}>
             <div style={{ width: 4, height: 34, borderRadius: 4, background: ev.color }} />
-            <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{ev.t}</div><div style={{ fontSize: 12, color: T.inkFaint }}>{ev.time}</div></div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{ev.title}</div>
+              <div style={{ fontSize: 12, color: T.inkFaint }}>
+                {new Date(ev.start_time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                {ev.end_time && ` – ${new Date(ev.end_time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`}
+              </div>
+            </div>
+            <X size={15} color={T.inkFaint} style={{ cursor: "pointer" }} onClick={() => onDeleteEvent(ev.id)} />
           </div>
         ))}
+
+        {showForm && (
+          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+            <FieldLabel>Title</FieldLabel>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Math 21 Quiz" style={inputStyle} autoFocus />
+            <FieldLabel>Starts</FieldLabel>
+            <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} style={inputStyle} />
+            <FieldLabel>Ends <span style={{ fontWeight: 500, color: T.inkFaint }}>(optional)</span></FieldLabel>
+            <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} style={inputStyle} />
+            <ErrorBanner message={error} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setShowForm(false)} style={{ ...secondaryBtn, flex: 1 }}>Cancel</button>
+              <button onClick={saveEvent} disabled={saving || !title.trim()} style={{ ...primaryBtn, flex: 1, opacity: saving || !title.trim() ? 0.6 : 1 }}>
+                {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Save"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -780,19 +863,81 @@ function TodoScreen({ tasks, back, onToggle, onAdd }) {
   );
 }
 
-function GroupScreen({ back, user }) {
+function GroupsListScreen({ back, groups, go, onCreate, onJoin }) {
+  const [mode, setMode] = useState(null); // null | "create" | "join"
+  const [input, setInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit() {
+    if (!input.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      if (mode === "create") await onCreate(input.trim());
+      else await onJoin(input.trim());
+      setMode(null);
+      setInput("");
+    } catch (err) {
+      setError(err.message || "Something went wrong.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div>
+      <TopBar title="Groups" />
+      <div style={screenBox}>
+        {groups.length === 0 && !mode && <div style={{ fontSize: 13, color: T.inkFaint, padding: "10px 0" }}>You're not in any groups yet.</div>}
+        {groups.map((g) => (
+          <div key={g.id} onClick={() => go("group", g.id)} style={{ ...rowCardStyle, cursor: "pointer" }}>
+            <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><Users size={18} /></div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>{g.name}</div>
+              <div style={{ fontSize: 12, color: T.inkFaint }}>{g.member_count} member{g.member_count === 1 ? "" : "s"} · code {g.invite_code}</div>
+            </div>
+            <ChevronRight size={17} color={T.inkFaint} />
+          </div>
+        ))}
+
+        {mode ? (
+          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+            <FieldLabel>{mode === "create" ? "Group name" : "Invite code"}</FieldLabel>
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={mode === "create" ? "Study Group" : "8-character code"} style={inputStyle} autoFocus onKeyDown={(e) => e.key === "Enter" && submit()} />
+            <ErrorBanner message={error} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setMode(null); setError(""); }} style={{ ...secondaryBtn, flex: 1 }}>Cancel</button>
+              <button onClick={submit} disabled={saving || !input.trim()} style={{ ...primaryBtn, flex: 1, opacity: saving || !input.trim() ? 0.6 : 1 }}>
+                {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : mode === "create" ? "Create" : "Join"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button onClick={() => setMode("create")} style={{ ...primaryBtn, flex: 1 }}><Plus size={16} /> New group</button>
+            <button onClick={() => setMode("join")} style={{ ...secondaryBtn, flex: 1 }}>Join with code</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GroupScreen({ back, user, group }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [connected, setConnected] = useState(false);
   const [authFailed, setAuthFailed] = useState(false);
+  const [showCode, setShowCode] = useState(false);
   const wsRef = useRef(null);
   const scrollRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
-    api.groups.messages(DEMO_GROUP_ID).then((history) => { if (!cancelled) setMessages(history || []); }).catch(() => {});
+    api.groups.messages(group.id).then((history) => { if (!cancelled) setMessages(history || []); }).catch(() => {});
 
-    const ws = new WebSocket(api.wsURL(DEMO_GROUP_ID));
+    const ws = new WebSocket(api.wsURL(group.id));
     wsRef.current = ws;
     ws.onopen = () => setConnected(true);
     ws.onclose = (evt) => {
@@ -805,7 +950,7 @@ function GroupScreen({ back, user }) {
       setMessages((prev) => [...prev, msg]);
     };
     return () => { cancelled = true; ws.close(); };
-  }, []);
+  }, [group.id]);
 
   useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight); }, [messages]);
 
@@ -819,11 +964,19 @@ function GroupScreen({ back, user }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <TopBar title="Study Group" onBack={back} right={<span style={{ fontSize: 11, fontWeight: 700, color: connected ? "#0E9F6E" : T.inkFaint, alignSelf: "center" }}>{connected ? "● live" : "connecting…"}</span>} />
+      <TopBar title={group.name} onBack={back} right={<>
+        <span style={{ fontSize: 11, fontWeight: 700, color: connected ? "#0E9F6E" : T.inkFaint, alignSelf: "center", marginRight: 4 }}>{connected ? "● live" : "connecting…"}</span>
+        <button onClick={() => setShowCode((s) => !s)} style={iconBtnStyle}><Users size={15} color={T.ink} /></button>
+      </>} />
+      {showCode && (
+        <div style={{ margin: "0 20px 10px", fontSize: 12, color: T.inkSoft, background: T.primarySoft, borderRadius: 10, padding: "8px 12px" }}>
+          Invite code: <strong>{group.invite_code}</strong> · {group.member_count} member{group.member_count === 1 ? "" : "s"}
+        </div>
+      )}
       {authFailed && <div style={{ margin: "0 20px 10px" }}><ErrorBanner message="Your session couldn't be verified for chat. Try signing out and back in." /></div>}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 20px", display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map((m) => {
-          const mine = m.sender_name === user.name;
+          const mine = m.sender_name === (user.name || user.username);
           return (
             <div key={m.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "78%" }}>
               {!mine && <div style={{ fontSize: 11, fontWeight: 700, color: T.primary, marginBottom: 2 }}>{m.sender_name}</div>}
@@ -841,14 +994,68 @@ function GroupScreen({ back, user }) {
   );
 }
 
-function InsightsScreen({ back, tasks }) {
+function InsightsScreen({ back, tasks, studySessions, onLogSession }) {
+  const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0); // seconds
+  const [saving, setSaving] = useState(false);
+  const startRef = useRef(null);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (running) {
+      startRef.current = Date.now() - elapsed * 1000;
+      intervalRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000);
+    }
+    return () => clearInterval(intervalRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
+  async function stopAndLog() {
+    setRunning(false);
+    clearInterval(intervalRef.current);
+    const minutes = Math.max(1, Math.round(elapsed / 60));
+    setSaving(true);
+    try {
+      await onLogSession(minutes);
+    } finally {
+      setElapsed(0);
+      setSaving(false);
+    }
+  }
+
   const done = tasks.filter((t) => t.done).length;
   const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
-  const maxHours = Math.max(...weeklyStudy.map((d) => d.hours));
+
+  const now = new Date();
+  const last7 = Array.from({ length: 7 }, (_, i) => { const d = new Date(now); d.setDate(d.getDate() - (6 - i)); return d; });
+  const minutesByDay = {};
+  studySessions.forEach((s) => {
+    const k = dayKey(new Date(s.started_at));
+    minutesByDay[k] = (minutesByDay[k] || 0) + s.minutes;
+  });
+  const weekData = last7.map((d) => ({ day: d.toLocaleDateString(undefined, { weekday: "short" })[0], minutes: minutesByDay[dayKey(d)] || 0 }));
+  const maxMinutes = Math.max(1, ...weekData.map((d) => d.minutes));
+  const totalMinutes = weekData.reduce((sum, d) => sum + d.minutes, 0);
+  const totalLabel = totalMinutes >= 60 ? `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m` : `${totalMinutes}m`;
+
+  const timerLabel = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+
   return (
     <div>
       <TopBar title="Insights" onBack={back} />
       <div style={screenBox}>
+        <div style={{ ...rowCardStyle, flexDirection: "column", gap: 10, padding: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study timer</div>
+          <div style={{ fontSize: 34, fontWeight: 800, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{timerLabel}</div>
+          {!running ? (
+            <button onClick={() => setRunning(true)} style={primaryBtn}>Start studying</button>
+          ) : (
+            <button onClick={stopAndLog} disabled={saving} style={{ ...primaryBtn, background: T.danger, opacity: saving ? 0.6 : 1 }}>
+              {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Stop & log session"}
+            </button>
+          )}
+        </div>
+
         <div style={{ display: "flex", gap: 12 }}>
           <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", flex: 1, gap: 6, padding: "16px 10px" }}>
             <div style={{ position: "relative" }}>
@@ -859,16 +1066,17 @@ function InsightsScreen({ back, tasks }) {
           </div>
           <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "flex-start", flex: 1, gap: 6, padding: "16px 14px", justifyContent: "center" }}>
             <TrendingUp size={18} color="#0E9F6E" />
-            <div style={{ fontSize: 20, fontWeight: 800, color: T.ink }}>14h 30m</div>
-            <div style={{ fontSize: 11.5, color: "#0E9F6E", fontWeight: 700 }}>Sample data</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.ink }}>{totalLabel}</div>
+            <div style={{ fontSize: 11.5, color: T.inkFaint, fontWeight: 700 }}>Last 7 days</div>
           </div>
         </div>
+
         <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 14, padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study time this week</div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 100 }}>
-            {weeklyStudy.map((d) => (
-              <div key={d.day} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <div style={{ width: "100%", borderRadius: 6, background: T.primary, height: `${(d.hours / maxHours) * 80}px`, opacity: 0.85 }} />
+            {weekData.map((d, i) => (
+              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                <div style={{ width: "100%", borderRadius: 6, background: T.primary, height: `${Math.max(4, (d.minutes / maxMinutes) * 80)}px`, opacity: 0.85 }} />
                 <div style={{ fontSize: 10.5, color: T.inkFaint, fontWeight: 600 }}>{d.day}</div>
               </div>
             ))}
@@ -1001,34 +1209,44 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
 const NAV_ITEMS = [
   { key: "home", label: "Home", icon: Home }, { key: "archive", label: "Archive", icon: FolderOpen },
   { key: "calendar", label: "Calendar", icon: CalendarIcon }, { key: "todo", label: "Tasks", icon: ListTodo },
-  { key: "group", label: "Groups", icon: Users }, { key: "insights", label: "Insights", icon: BarChart3 },
+  { key: "groupslist", label: "Groups", icon: Users }, { key: "insights", label: "Insights", icon: BarChart3 },
   { key: "reminders", label: "Reminders", icon: Bell }, { key: "profile", label: "Profile", icon: User },
 ];
 const MOBILE_NAV = [
   { key: "home", icon: Home, label: "Home" }, { key: "archive", icon: FolderOpen, label: "Archive" },
-  { key: "capture", icon: Plus, label: "" }, { key: "group", icon: Users, label: "Groups" },
+  { key: "capture", icon: Plus, label: "" }, { key: "groupslist", icon: Users, label: "Groups" },
   { key: "profile", icon: User, label: "Profile" },
 ];
 
 function MainShell({ user, onLogout, onUserUpdate }) {
   const [screen, setScreen] = useState("home");
   const [activeFolder, setActiveFolder] = useState(null);
+  const [activeGroupId, setActiveGroupId] = useState(null);
   const [folders, setFolders] = useState({});
   const [tasks, setTasks] = useState([]);
   const [reminders, setReminders] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [studySessions, setStudySessions] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.folders.list(), api.tasks.list(), api.reminders.list()])
-      .then(([f, t, r]) => {
+    Promise.all([
+      api.folders.list(), api.tasks.list(), api.reminders.list(),
+      api.events.list(), api.studySessions.list(), api.groups.list(),
+    ])
+      .then(([f, t, r, ev, ss, gr]) => {
         if (cancelled) return;
         const byName = {};
         f.forEach((folder) => { byName[folder.name] = folder; });
         setFolders(byName);
         setTasks(t);
         setReminders(r);
+        setEvents(ev);
+        setStudySessions(ss);
+        setGroups(gr);
       })
       .catch((err) => !cancelled && setError(err.message))
       .finally(() => !cancelled && setLoading(false));
@@ -1037,6 +1255,7 @@ function MainShell({ user, onLogout, onUserUpdate }) {
 
   function go(target, param) {
     if (target === "folder") setActiveFolder(param);
+    if (target === "group") setActiveGroupId(param);
     setScreen(target);
   }
 
@@ -1067,6 +1286,37 @@ function MainShell({ user, onLogout, onUserUpdate }) {
     setReminders((prev) => [created, ...prev]);
   }
 
+  async function addEvent(payload) {
+    const created = await api.events.create(payload);
+    setEvents((prev) => [...prev, created]);
+  }
+
+  async function deleteEvent(id) {
+    await api.events.delete(id);
+    setEvents((prev) => prev.filter((e) => e.id !== id));
+  }
+
+  async function logStudySession(minutes) {
+    const created = await api.studySessions.create({ minutes });
+    setStudySessions((prev) => [created, ...prev]);
+  }
+
+  async function createGroup(name) {
+    const created = await api.groups.create({ name });
+    setGroups((prev) => [...prev, created]);
+    setActiveGroupId(created.id);
+    setScreen("group");
+  }
+
+  async function joinGroup(inviteCode) {
+    const joined = await api.groups.join({ invite_code: inviteCode });
+    setGroups((prev) => (prev.some((g) => g.id === joined.id) ? prev : [...prev, joined]));
+    setActiveGroupId(joined.id);
+    setScreen("group");
+  }
+
+  const activeGroup = groups.find((g) => g.id === activeGroupId);
+
   function renderScreen() {
     if (loading) return <CenterSpinner label="Loading your archive…" />;
     if (error) return <div style={{ padding: 20 }}><ErrorBanner message={error} /></div>;
@@ -1076,10 +1326,13 @@ function MainShell({ user, onLogout, onUserUpdate }) {
       case "archive": return <ArchiveScreen folders={folders} go={go} />;
       case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} />;
       case "capture": return <CaptureScreen back={() => setScreen("home")} onSave={saveItem} folders={folders} />;
-      case "calendar": return <CalendarScreen back={() => setScreen("home")} />;
+      case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} />;
       case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} />;
-      case "group": return <GroupScreen back={() => setScreen("home")} user={user} />;
-      case "insights": return <InsightsScreen back={() => setScreen("home")} tasks={tasks} />;
+      case "groupslist": return <GroupsListScreen groups={groups} go={go} onCreate={createGroup} onJoin={joinGroup} />;
+      case "group": return activeGroup
+        ? <GroupScreen back={() => setScreen("groupslist")} user={user} group={activeGroup} />
+        : <CenterSpinner label="Loading group…" />;
+      case "insights": return <InsightsScreen back={() => setScreen("home")} tasks={tasks} studySessions={studySessions} onLogSession={logStudySession} />;
       case "reminders": return <RemindersScreen back={() => setScreen("home")} reminders={reminders} onAdd={addReminder} />;
       case "profile": return <ProfileScreen back={() => setScreen("home")} user={user} onLogout={onLogout} onUserUpdate={onUserUpdate} />;
       default: return null;

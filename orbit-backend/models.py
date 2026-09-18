@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -49,6 +49,8 @@ class User(Base):
     folders = relationship("Folder", back_populates="owner", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="owner", cascade="all, delete-orphan")
     reminders = relationship("Reminder", back_populates="owner", cascade="all, delete-orphan")
+    events = relationship("Event", back_populates="owner", cascade="all, delete-orphan")
+    study_sessions = relationship("StudySession", back_populates="owner", cascade="all, delete-orphan")
 
 
 class RevokedToken(Base):
@@ -118,7 +120,69 @@ class GroupMessage(Base):
     __tablename__ = "group_messages"
 
     id = Column(String, primary_key=True, default=gen_id)
-    group_id = Column(String, nullable=False, index=True)
+    group_id = Column(String, ForeignKey("groups.id"), nullable=False, index=True)
     sender_name = Column(String, nullable=False)
     text = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    title = Column(String, nullable=False)
+    description = Column(String, default="")
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=True)
+    color = Column(String, default="#5B3FE0")
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+
+    owner = relationship("User", back_populates="events")
+
+
+class StudySession(Base):
+    """
+    A logged block of study time — either a manual entry or the result of
+    starting/stopping the in-app timer. There's no automatic activity
+    tracking; every session is something the person explicitly logged.
+    """
+    __tablename__ = "study_sessions"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    minutes = Column(Integer, nullable=False)
+    note = Column(String, default="")
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+
+    owner = relationship("User", back_populates="study_sessions")
+
+
+def gen_invite_code() -> str:
+    # Short, readable, still plenty of entropy for a small invite-only group
+    # (not a security boundary on its own — treat it like a shareable link).
+    return uuid.uuid4().hex[:8]
+
+
+class Group(Base):
+    __tablename__ = "groups"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    name = Column(String, nullable=False)
+    invite_code = Column(String, unique=True, nullable=False, default=gen_invite_code, index=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    memberships = relationship("GroupMembership", back_populates="group", cascade="all, delete-orphan")
+
+
+class GroupMembership(Base):
+    __tablename__ = "group_memberships"
+    __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_group_membership"),)
+
+    id = Column(String, primary_key=True, default=gen_id)
+    group_id = Column(String, ForeignKey("groups.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
+    group = relationship("Group", back_populates="memberships")
+    user = relationship("User")

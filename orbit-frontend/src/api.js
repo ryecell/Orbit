@@ -67,7 +67,23 @@ export const api = {
     create: (payload) => request("/reminders", { method: "POST", body: payload }),
   },
 
+  events: {
+    list: () => request("/events"),
+    create: (payload) => request("/events", { method: "POST", body: payload }),
+    update: (id, payload) => request(`/events/${id}`, { method: "PATCH", body: payload }),
+    delete: (id) => request(`/events/${id}`, { method: "DELETE" }),
+  },
+
+  studySessions: {
+    list: () => request("/study-sessions"),
+    create: (payload) => request("/study-sessions", { method: "POST", body: payload }),
+  },
+
   groups: {
+    list: () => request("/groups"),
+    create: (payload) => request("/groups", { method: "POST", body: payload }),
+    join: (payload) => request("/groups/join", { method: "POST", body: payload }),
+    leave: (groupId) => request(`/groups/${groupId}/leave`, { method: "POST" }),
     messages: (groupId) => request(`/groups/${groupId}/messages`),
     postMessage: (groupId, payload) => request(`/groups/${groupId}/messages`, { method: "POST", body: payload }),
   },

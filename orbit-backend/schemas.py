@@ -153,11 +153,78 @@ class ReminderOut(BaseModel):
         from_attributes = True
 
 
+# ---------- Calendar events ----------
+
+class EventCreate(BaseModel):
+    title: str
+    description: str = ""
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    color: str = "#5B3FE0"
+
+
+class EventUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    color: Optional[str] = None
+
+
+class EventOut(BaseModel):
+    id: str
+    title: str
+    description: str
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    color: str
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Study sessions (Insights) ----------
+
+class StudySessionCreate(BaseModel):
+    minutes: int = Field(gt=0, le=24 * 60)  # a single logged session can't exceed a full day
+    note: str = ""
+    started_at: Optional[datetime] = None  # defaults to now if omitted
+
+
+class StudySessionOut(BaseModel):
+    id: str
+    minutes: int
+    note: str
+    started_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Groups ----------
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
+class JoinGroupRequest(BaseModel):
+    invite_code: str
+
+
+class GroupOut(BaseModel):
+    id: str
+    name: str
+    invite_code: str
+    member_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
 # ---------- Group chat ----------
 
 class MessageCreate(BaseModel):
-    sender_name: str
-    text: str
+    text: str  # sender_name is never trusted from the client — derived from the authenticated user
 
 
 class MessageOut(BaseModel):

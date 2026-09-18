@@ -441,10 +441,161 @@ def create_reminder(payload: schemas.ReminderCreate, db: Session = Depends(get_d
     return reminder
 
 
+# ============================== CALENDAR EVENTS ==============================
+
+@app.get("/events", response_model=List[schemas.EventOut])
+def list_events(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    # No date-range filtering server-side — the calendar screen fetches the
+    # full list and filters by month client-side, same pattern as tasks and
+    # reminders. Fine at personal-archive scale; would want a range filter
+    # if this ever needed to handle years of events.
+    return db.query(models.Event).filter(models.Event.owner_id == user.id).order_by(models.Event.start_time.asc()).all()
+
+
+@app.post("/events", response_model=schemas.EventOut, status_code=status.HTTP_201_CREATED)
+def create_event(payload: schemas.EventCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    event = models.Event(
+        title=payload.title,
+        description=payload.description,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        color=payload.color,
+        owner_id=user.id,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@app.patch("/events/{event_id}", response_model=schemas.EventOut)
+def update_event(event_id: str, payload: schemas.EventUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    event = db.query(models.Event).filter(models.Event.id == event_id, models.Event.owner_id == user.id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(event, field, value)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@app.delete("/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_event(event_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    event = db.query(models.Event).filter(models.Event.id == event_id, models.Event.owner_id == user.id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    db.delete(event)
+    db.commit()
+
+
+# ============================== STUDY SESSIONS (INSIGHTS) ==============================
+
+@app.get("/study-sessions", response_model=List[schemas.StudySessionOut])
+def list_study_sessions(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    return (
+        db.query(models.StudySession)
+        .filter(models.StudySession.owner_id == user.id)
+        .order_by(models.StudySession.started_at.desc())
+        .limit(200)
+        .all()
+    )
+
+
+@app.post("/study-sessions", response_model=schemas.StudySessionOut, status_code=status.HTTP_201_CREATED)
+def create_study_session(payload: schemas.StudySessionCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    session_row = models.StudySession(
+        minutes=payload.minutes,
+        note=payload.note,
+        started_at=payload.started_at or datetime.utcnow(),
+        owner_id=user.id,
+    )
+    db.add(session_row)
+    db.commit()
+    db.refresh(session_row)
+    return session_row
+
+
+# ============================== GROUPS ==============================
+
+def _require_membership(group_id: str, user_id: str, db: Session) -> models.Group:
+    """Raises 404 (not 403) for both 'group doesn't exist' and 'not a member' —
+    a 403 would confirm the group exists to someone probing random IDs."""
+    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    member = (
+        db.query(models.GroupMembership)
+        .filter(models.GroupMembership.group_id == group_id, models.GroupMembership.user_id == user_id)
+        .first()
+    )
+    if not member:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return group
+
+
+def _group_out(group: models.Group, db: Session) -> dict:
+    count = db.query(models.GroupMembership).filter(models.GroupMembership.group_id == group.id).count()
+    return {"id": group.id, "name": group.name, "invite_code": group.invite_code, "member_count": count}
+
+
+@app.get("/groups", response_model=List[schemas.GroupOut])
+def list_my_groups(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    memberships = db.query(models.GroupMembership).filter(models.GroupMembership.user_id == user.id).all()
+    groups = [m.group for m in memberships]
+    return [_group_out(g, db) for g in groups]
+
+
+@app.post("/groups", response_model=schemas.GroupOut, status_code=status.HTTP_201_CREATED)
+def create_group(payload: schemas.GroupCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    group = models.Group(name=payload.name, created_by=user.id)
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    db.add(models.GroupMembership(group_id=group.id, user_id=user.id))
+    db.commit()
+
+    return _group_out(group, db)
+
+
+@app.post("/groups/join", response_model=schemas.GroupOut)
+@limiter.limit("10/minute")
+def join_group(request: Request, payload: schemas.JoinGroupRequest, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    group = db.query(models.Group).filter(models.Group.invite_code == payload.invite_code.strip()).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="No group found with that invite code")
+
+    existing = (
+        db.query(models.GroupMembership)
+        .filter(models.GroupMembership.group_id == group.id, models.GroupMembership.user_id == user.id)
+        .first()
+    )
+    if not existing:
+        db.add(models.GroupMembership(group_id=group.id, user_id=user.id))
+        db.commit()
+
+    return _group_out(group, db)
+
+
+@app.post("/groups/{group_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+def leave_group(group_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    membership = (
+        db.query(models.GroupMembership)
+        .filter(models.GroupMembership.group_id == group_id, models.GroupMembership.user_id == user.id)
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=404, detail="Group not found")
+    db.delete(membership)
+    db.commit()
+
+
 # ============================== GROUP CHAT ==============================
 
 @app.get("/groups/{group_id}/messages", response_model=List[schemas.MessageOut])
 def list_messages(group_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    _require_membership(group_id, user.id, db)
     return (
         db.query(models.GroupMessage)
         .filter(models.GroupMessage.group_id == group_id)
@@ -455,6 +606,7 @@ def list_messages(group_id: str, db: Session = Depends(get_db), user: models.Use
 
 @app.post("/groups/{group_id}/messages", response_model=schemas.MessageOut, status_code=status.HTTP_201_CREATED)
 def post_message(group_id: str, payload: schemas.MessageCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    _require_membership(group_id, user.id, db)
     # sender_name comes from the authenticated user, never from the request body —
     # trusting a client-supplied name would let anyone post as anyone else.
     msg = models.GroupMessage(group_id=group_id, sender_name=user.name, text=payload.text[:2000])
@@ -507,6 +659,7 @@ async def group_chat_ws(websocket: WebSocket, group_id: str, token: Optional[str
     db = SessionLocal()
     try:
         user = auth.get_current_user(token=token, db=db)
+        _require_membership(group_id, user.id, db)  # also 404s a nonexistent group
     except HTTPException:
         await websocket.close(code=4401)
         db.close()

@@ -120,8 +120,13 @@ that itself.
 | POST   | `/folders/{id}/items`         | Add an archive item             |
 | GET/POST/PATCH/DELETE | `/tasks`, `/tasks/{id}` | To-do management          |
 | GET/POST | `/reminders`                | Smart reminders                 |
-| GET/POST | `/groups/{id}/messages`     | Chat history (REST)             |
-| WS     | `/ws/groups/{id}?token=...`   | Live chat over WebSocket, auth required |
+| GET/POST/PATCH/DELETE | `/events`, `/events/{id}` | Calendar events            |
+| GET/POST | `/study-sessions`           | Logged study time (feeds Insights) |
+| GET/POST | `/groups`                   | List / create groups you belong to |
+| POST   | `/groups/join`                | Join a group by invite code     |
+| POST   | `/groups/{id}/leave`          | Leave a group                   |
+| GET/POST | `/groups/{id}/messages`     | Chat history (REST) — requires membership |
+| WS     | `/ws/groups/{id}?token=...`   | Live chat over WebSocket — auth + membership required |
 | POST   | `/ai/analyze`                 | Sends an image to Claude server-side, returns title/folder/tags/summary |
 
 All routes except `/auth/*`, `/health`, and `/docs` require
