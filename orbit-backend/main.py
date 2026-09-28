@@ -123,18 +123,31 @@ DEFAULT_FOLDERS = [
 @app.post("/auth/register", response_model=schemas.Token, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 def register(request: Request, payload: schemas.UserCreate, db: Session = Depends(get_db)):
-    if db.query(models.User).filter(models.User.email == payload.email).first():
+    if db.query(models.User).filter(models.User.username == payload.username).first():
+        raise HTTPException(status_code=400, detail="That username is already taken")
+
+    if payload.email and db.query(models.User).filter(models.User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="An account with this email already exists")
 
-    verification_token, verification_expires = auth.generate_verification_token()
     user = models.User(
-        name=payload.name,
+        username=payload.username,
+        name=payload.name or payload.username,
         email=payload.email,
         hashed_password=auth.hash_password(payload.password),
         is_verified=False,
-        verification_token=verification_token,
-        verification_expires=verification_expires,
+        # The schema validator already rejects accept_terms=False, so
+        # reaching this point means they agreed — timestamp it now rather
+        # than trusting the client's clock.
+        accepted_terms_at=datetime.utcnow(),
     )
+
+    # Only generate a verification token if there's actually an email to
+    # verify — most new accounts won't have one yet, and that's fine.
+    if payload.email:
+        verification_token, verification_expires = auth.generate_verification_token()
+        user.verification_token = verification_token
+        user.verification_expires = verification_expires
+
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -144,11 +157,9 @@ def register(request: Request, payload: schemas.UserCreate, db: Session = Depend
         db.add(models.Folder(name=name, color=color, owner_id=user.id))
     db.commit()
 
-    auth.send_verification_email(user.email, verification_token)
+    if payload.email:
+        auth.send_verification_email(user.email, user.verification_token)
 
-    # The account is usable immediately (unverified) rather than blocking
-    # login — verification unlocks trust signals/future features without
-    # forcing a broken-feeling first run. See README for the tradeoff.
     token = auth.create_access_token({"sub": user.id})
     return schemas.Token(access_token=token, user=user)
 
@@ -171,6 +182,8 @@ def verify_email(token: str, db: Session = Depends(get_db)):
 @app.post("/auth/resend-verification", status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("3/minute")
 def resend_verification(request: Request, user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    if not user.email:
+        raise HTTPException(status_code=400, detail="No email is linked to this account yet.")
     if user.is_verified:
         return {"detail": "Already verified"}
     token, expires = auth.generate_verification_token()
@@ -181,14 +194,41 @@ def resend_verification(request: Request, user: models.User = Depends(auth.get_c
     return {"detail": "Verification email sent"}
 
 
+@app.patch("/me/email", response_model=schemas.UserOut)
+@limiter.limit("3/minute")
+def link_email(
+    request: Request,
+    payload: schemas.LinkEmailRequest,
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Add or change the email linked to an existing account. Always requires re-verification."""
+    existing = db.query(models.User).filter(models.User.email == payload.email, models.User.id != user.id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="That email is already linked to another account")
+
+    token, expires = auth.generate_verification_token()
+    user.email = payload.email
+    user.is_verified = False
+    user.verification_token = token
+    user.verification_expires = expires
+    db.commit()
+    db.refresh(user)
+
+    auth.send_verification_email(user.email, token)
+    logger.info("Email linked to account %s, pending verification", user.username)
+    return user
+
+
 @app.post("/auth/login", response_model=schemas.Token)
 @limiter.limit("10/minute")
 def login(request: Request, payload: schemas.UserLogin, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    username = payload.username.strip().lower()
+    user = db.query(models.User).filter(models.User.username == username).first()
 
-    # Same generic error whether the email doesn't exist or the password is
-    # wrong — distinguishing the two lets an attacker enumerate real accounts.
-    generic_error = HTTPException(status_code=401, detail="Incorrect email or password")
+    # Same generic error whether the username doesn't exist or the password
+    # is wrong — distinguishing the two lets an attacker enumerate accounts.
+    generic_error = HTTPException(status_code=401, detail="Incorrect username or password")
 
     if not user:
         raise generic_error
@@ -216,21 +256,22 @@ def logout(
     db: Session = Depends(get_db),
 ):
     auth.revoke_token(token, db)
-    logger.info("Token revoked on logout: %s", user.email)
+    logger.info("Token revoked on logout: %s", user.username)
 
 
 @app.post("/auth/forgot-password", status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("3/minute")
 def forgot_password(request: Request, payload: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
     """
-    Always returns the same generic response whether or not the email
-    exists — anything else would let someone enumerate registered accounts
-    by checking which emails trigger a different response.
+    Identified by username now, not email — email may not exist for this
+    account. Always returns the same generic response regardless of whether
+    the username exists or has an email linked, to prevent enumeration.
     """
-    generic_response = {"detail": "If an account exists for that email, a reset link has been sent."}
+    generic_response = {"detail": "If that account has an email on file, a reset link has been sent to it."}
 
-    user = db.query(models.User).filter(models.User.email == payload.email).first()
-    if not user:
+    username = payload.username.strip().lower()
+    user = db.query(models.User).filter(models.User.username == username).first()
+    if not user or not user.email:
         return generic_response
 
     token, expires = auth.generate_password_reset_token()
@@ -239,7 +280,7 @@ def forgot_password(request: Request, payload: schemas.ForgotPasswordRequest, db
     db.commit()
 
     auth.send_password_reset_email(user.email, token)
-    logger.info("Password reset requested for %s", user.email)
+    logger.info("Password reset requested for %s", user.username)
     return generic_response
 
 
@@ -404,10 +445,161 @@ def create_reminder(payload: schemas.ReminderCreate, db: Session = Depends(get_d
     return reminder
 
 
+# ============================== CALENDAR EVENTS ==============================
+
+@app.get("/events", response_model=List[schemas.EventOut])
+def list_events(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    # No date-range filtering server-side — the calendar screen fetches the
+    # full list and filters by month client-side, same pattern as tasks and
+    # reminders. Fine at personal-archive scale; would want a range filter
+    # if this ever needed to handle years of events.
+    return db.query(models.Event).filter(models.Event.owner_id == user.id).order_by(models.Event.start_time.asc()).all()
+
+
+@app.post("/events", response_model=schemas.EventOut, status_code=status.HTTP_201_CREATED)
+def create_event(payload: schemas.EventCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    event = models.Event(
+        title=payload.title,
+        description=payload.description,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        color=payload.color,
+        owner_id=user.id,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@app.patch("/events/{event_id}", response_model=schemas.EventOut)
+def update_event(event_id: str, payload: schemas.EventUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    event = db.query(models.Event).filter(models.Event.id == event_id, models.Event.owner_id == user.id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(event, field, value)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@app.delete("/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_event(event_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    event = db.query(models.Event).filter(models.Event.id == event_id, models.Event.owner_id == user.id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    db.delete(event)
+    db.commit()
+
+
+# ============================== STUDY SESSIONS (INSIGHTS) ==============================
+
+@app.get("/study-sessions", response_model=List[schemas.StudySessionOut])
+def list_study_sessions(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    return (
+        db.query(models.StudySession)
+        .filter(models.StudySession.owner_id == user.id)
+        .order_by(models.StudySession.started_at.desc())
+        .limit(200)
+        .all()
+    )
+
+
+@app.post("/study-sessions", response_model=schemas.StudySessionOut, status_code=status.HTTP_201_CREATED)
+def create_study_session(payload: schemas.StudySessionCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    session_row = models.StudySession(
+        minutes=payload.minutes,
+        note=payload.note,
+        started_at=payload.started_at or datetime.utcnow(),
+        owner_id=user.id,
+    )
+    db.add(session_row)
+    db.commit()
+    db.refresh(session_row)
+    return session_row
+
+
+# ============================== GROUPS ==============================
+
+def _require_membership(group_id: str, user_id: str, db: Session) -> models.Group:
+    """Raises 404 (not 403) for both 'group doesn't exist' and 'not a member' —
+    a 403 would confirm the group exists to someone probing random IDs."""
+    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    member = (
+        db.query(models.GroupMembership)
+        .filter(models.GroupMembership.group_id == group_id, models.GroupMembership.user_id == user_id)
+        .first()
+    )
+    if not member:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return group
+
+
+def _group_out(group: models.Group, db: Session) -> dict:
+    count = db.query(models.GroupMembership).filter(models.GroupMembership.group_id == group.id).count()
+    return {"id": group.id, "name": group.name, "invite_code": group.invite_code, "member_count": count}
+
+
+@app.get("/groups", response_model=List[schemas.GroupOut])
+def list_my_groups(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    memberships = db.query(models.GroupMembership).filter(models.GroupMembership.user_id == user.id).all()
+    groups = [m.group for m in memberships]
+    return [_group_out(g, db) for g in groups]
+
+
+@app.post("/groups", response_model=schemas.GroupOut, status_code=status.HTTP_201_CREATED)
+def create_group(payload: schemas.GroupCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    group = models.Group(name=payload.name, created_by=user.id)
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    db.add(models.GroupMembership(group_id=group.id, user_id=user.id))
+    db.commit()
+
+    return _group_out(group, db)
+
+
+@app.post("/groups/join", response_model=schemas.GroupOut)
+@limiter.limit("10/minute")
+def join_group(request: Request, payload: schemas.JoinGroupRequest, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    group = db.query(models.Group).filter(models.Group.invite_code == payload.invite_code.strip()).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="No group found with that invite code")
+
+    existing = (
+        db.query(models.GroupMembership)
+        .filter(models.GroupMembership.group_id == group.id, models.GroupMembership.user_id == user.id)
+        .first()
+    )
+    if not existing:
+        db.add(models.GroupMembership(group_id=group.id, user_id=user.id))
+        db.commit()
+
+    return _group_out(group, db)
+
+
+@app.post("/groups/{group_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+def leave_group(group_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    membership = (
+        db.query(models.GroupMembership)
+        .filter(models.GroupMembership.group_id == group_id, models.GroupMembership.user_id == user.id)
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=404, detail="Group not found")
+    db.delete(membership)
+    db.commit()
+
+
 # ============================== GROUP CHAT ==============================
 
 @app.get("/groups/{group_id}/messages", response_model=List[schemas.MessageOut])
 def list_messages(group_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    _require_membership(group_id, user.id, db)
     return (
         db.query(models.GroupMessage)
         .filter(models.GroupMessage.group_id == group_id)
@@ -418,6 +610,7 @@ def list_messages(group_id: str, db: Session = Depends(get_db), user: models.Use
 
 @app.post("/groups/{group_id}/messages", response_model=schemas.MessageOut, status_code=status.HTTP_201_CREATED)
 def post_message(group_id: str, payload: schemas.MessageCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    _require_membership(group_id, user.id, db)
     # sender_name comes from the authenticated user, never from the request body —
     # trusting a client-supplied name would let anyone post as anyone else.
     msg = models.GroupMessage(group_id=group_id, sender_name=user.name, text=payload.text[:2000])
@@ -470,6 +663,7 @@ async def group_chat_ws(websocket: WebSocket, group_id: str, token: Optional[str
     db = SessionLocal()
     try:
         user = auth.get_current_user(token=token, db=db)
+        _require_membership(group_id, user.id, db)  # also 404s a nonexistent group
     except HTTPException:
         await websocket.close(code=4401)
         db.close()

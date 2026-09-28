@@ -25,6 +25,12 @@ If you've run an older version of this backend before, delete `orbit.db` —
 the schema has changed and there's no migration path from pre-Alembic
 databases.
 
+**Identity model:** `username` is the account identifier — required, unique,
+used for login. `email` is optional, addable later from Profile settings,
+and used only for verification and password-reset emails. An account with
+no email has no way to recover a forgotten password; that's a deliberate
+signup-friction tradeoff, not an oversight.
+
 Visit `http://localhost:8000/docs` for interactive API docs.
 
 ## Production setup
@@ -109,12 +115,18 @@ that itself.
 | POST   | `/auth/forgot-password`       | Always returns a generic response, emails a reset link if the account exists |
 | POST   | `/auth/reset-password`        | Sets a new password from a valid reset token; invalidates existing sessions |
 | GET    | `/me`                         | Current user                    |
+| PATCH  | `/me/email`                   | Link or change the account's email (optional at signup) |
 | GET/POST | `/folders`                  | List / create folders           |
 | POST   | `/folders/{id}/items`         | Add an archive item             |
 | GET/POST/PATCH/DELETE | `/tasks`, `/tasks/{id}` | To-do management          |
 | GET/POST | `/reminders`                | Smart reminders                 |
-| GET/POST | `/groups/{id}/messages`     | Chat history (REST)             |
-| WS     | `/ws/groups/{id}?token=...`   | Live chat over WebSocket, auth required |
+| GET/POST/PATCH/DELETE | `/events`, `/events/{id}` | Calendar events            |
+| GET/POST | `/study-sessions`           | Logged study time (feeds Insights) |
+| GET/POST | `/groups`                   | List / create groups you belong to |
+| POST   | `/groups/join`                | Join a group by invite code     |
+| POST   | `/groups/{id}/leave`          | Leave a group                   |
+| GET/POST | `/groups/{id}/messages`     | Chat history (REST) — requires membership |
+| WS     | `/ws/groups/{id}?token=...`   | Live chat over WebSocket — auth + membership required |
 | POST   | `/ai/analyze`                 | Sends an image to Claude server-side, returns title/folder/tags/summary |
 
 All routes except `/auth/*`, `/health`, and `/docs` require

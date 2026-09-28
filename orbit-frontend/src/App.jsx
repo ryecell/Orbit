@@ -4,54 +4,95 @@ import {
   ChevronLeft, ChevronRight, CheckSquare, Square, Clock, MapPin, TrendingUp, Sparkles,
   Send, X, Check, ArrowLeft, Shield, Zap, Star, Atom, Sigma, Wrench, FileText,
   Wifi, Mic, ListTodo, BarChart3, ChevronDown, AlertCircle, Loader2,
-  Leaf, Paperclip, Lock, LayoutGrid, Layers, Orbit as OrbitIcon, LogOut, Mail, KeyRound
+  Leaf, Paperclip, Lock, LayoutGrid, Layers, LogOut, Mail, KeyRound
 } from "lucide-react";
 import { api } from "./api.js";
 
 /* ---------------------------------- THEME ---------------------------------- */
 
 const T = {
-  bg: "#F4F1FB",
-  panel: "#FFFFFF",
-  ink: "#1B1533",
-  inkSoft: "#6F6885",
-  inkFaint: "#A29BB8",
-  line: "#E9E4F7",
-  primary: "#5B3FE0",
-  primaryDark: "#3F2AA8",
-  primarySoft: "#EEEAFC",
-  sidebar: "#160F2B",
-  sidebarSoft: "#2A2049",
-  danger: "#E2456B",
+  bg: "#FFFFFF",            // white page background
+  panel: "#F6FBF8",         // faint mint-white for cards — just enough to separate from bg
+  ink: "#12241C",           // deep green-black text (not pure black — keeps the green identity)
+  inkSoft: "#5C7568",       // muted green-gray secondary text
+  inkFaint: "#9BB0A3",      // faint green-gray for placeholders
+  line: "#E1ECE5",          // soft green-tinted border
+  primary: "#50C878",       // emerald — buttons, active states, key accents
+  primaryDark: "#2F9159",
+  primarySoft: "rgba(80,200,120,0.14)",
+  primaryGlow: "rgba(80,200,120,0.38)",  // for soft glow/fade effects around key elements
+  sidebar: "#081C13",       // kept dark — a "night sky" strip against the white content
+  sidebarSoft: "#12291B",
+  danger: "#E2456B",        // kept distinct from the palette — errors should still read as errors
 };
+
+// A faint tileable sparkle texture — gold and spring-green flecks, visible
+// but subtle against white. Same idea as the dark theme's starfield, just
+// recalibrated so it reads as "glitter" rather than "dirty background."
+// echoes the gold-flecked moodboard without needing an image asset.
+const STARFIELD_BG = {
+  backgroundImage: `
+    radial-gradient(1.6px 1.6px at 20px 30px, rgba(212,175,55,0.5), transparent),
+    radial-gradient(1.2px 1.2px at 70px 90px, rgba(212,175,55,0.32), transparent),
+    radial-gradient(1.6px 1.6px at 140px 45px, rgba(212,175,55,0.38), transparent),
+    radial-gradient(1.2px 1.2px at 100px 130px, rgba(80,200,120,0.28), transparent),
+    radial-gradient(1.6px 1.6px at 170px 100px, rgba(212,175,55,0.3), transparent),
+    radial-gradient(1.2px 1.2px at 40px 160px, rgba(80,200,120,0.22), transparent)
+  `,
+  backgroundRepeat: "repeat",
+  backgroundSize: "200px 200px",
+};
+
+function OrbitCatLogo({ size = 28, glow = true }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" style={glow ? { filter: "drop-shadow(0 0 10px rgba(80,200,120,0.45))" } : undefined}>
+      <defs>
+        <radialGradient id="orbitCatDome" cx="35%" cy="30%" r="75%">
+          <stop offset="0%" stopColor="#EAFBF1" />
+          <stop offset="55%" stopColor="#8FE3B0" />
+          <stop offset="100%" stopColor="#50C878" />
+        </radialGradient>
+      </defs>
+      <ellipse cx="32" cy="43" rx="29" ry="9.5" stroke="#D4AF37" strokeWidth="1.4" opacity="0.35" transform="rotate(-6 32 43)" />
+      <ellipse cx="32" cy="45" rx="21" ry="7.5" fill="#B8952B" />
+      <ellipse cx="32" cy="42" rx="22" ry="7" fill="#D4AF37" />
+      <circle cx="18" cy="43.5" r="1.6" fill="#EAF3EC" />
+      <circle cx="32" cy="46" r="1.6" fill="#EAF3EC" />
+      <circle cx="46" cy="43.5" r="1.6" fill="#EAF3EC" />
+      <circle cx="32" cy="27" r="15" fill="url(#orbitCatDome)" stroke="#D4AF37" strokeWidth="1.2" />
+      <path d="M21 18 L24 8 L29 17 Z" fill="#50C878" />
+      <path d="M43 18 L40 8 L35 17 Z" fill="#50C878" />
+      <circle cx="32" cy="29" r="11.5" fill="#6FDA9C" />
+      <ellipse cx="27" cy="27.5" rx="1.9" ry="2.3" fill="#0A2617" />
+      <ellipse cx="37" cy="27.5" rx="1.9" ry="2.3" fill="#0A2617" />
+      <path d="M31 32 L33 32 L32 33.4 Z" fill="#0A2617" />
+      <path d="M8 12 L9 15 L12 16 L9 17 L8 20 L7 17 L4 16 L7 15 Z" fill="#D4AF37" opacity="0.85" />
+      <path d="M54 10 L54.8 12.3 L57 13 L54.8 13.7 L54 16 L53.2 13.7 L51 13 L53.2 12.3 Z" fill="#D4AF37" opacity="0.7" />
+      <path d="M52 44 L52.6 45.8 L54.4 46.4 L52.6 47 L52 48.8 L51.4 47 L49.6 46.4 L51.4 45.8 Z" fill="#D4AF37" opacity="0.6" />
+    </svg>
+  );
+}
 
 const FOLDER_META = {
-  "Biology": { color: "#0E9F6E", icon: Leaf },
-  "Math 21": { color: "#5B3FE0", icon: Sigma },
-  "Physics": { color: "#E2456B", icon: Atom },
-  "Group Project": { color: "#A855F7", icon: Users },
-  "Workshops": { color: "#D68A0C", icon: Wrench },
-  "Personal": { color: "#0891B2", icon: User },
+  "Biology": { color: "#00674F", icon: Leaf },
+  "Math 21": { color: "#009B77", icon: Sigma },
+  "Physics": { color: "#046307", icon: Atom },
+  "Group Project": { color: "#D4AF37", icon: Users },
+  "Workshops": { color: "#7FE0A8", icon: Wrench },
+  "Personal": { color: "#2F9159", icon: User },
 };
 const FOLDER_NAMES = Object.keys(FOLDER_META);
-const DEMO_GROUP_ID = "study-group-1";
-
-// Calendar/insights have no backend model yet, so these stay illustrative.
-const weeklyStudy = [
-  { day: "Mon", hours: 1.5 }, { day: "Tue", hours: 2.2 }, { day: "Wed", hours: 1.8 },
-  { day: "Thu", hours: 3.1 }, { day: "Fri", hours: 2.4 }, { day: "Sat", hours: 2.0 }, { day: "Sun", hours: 1.5 },
-];
-const MAY_EVENTS = {
-  7: [{ t: "Math 21 Quiz", time: "10:00 – 11:00 AM", color: T.primary }],
-  15: [
-    { t: "Math 21 Quiz", time: "10:00 – 11:00 AM", color: T.primary },
-    { t: "Group Meeting", time: "2:00 – 3:00 PM", color: "#A855F7" },
-    { t: "Physics Lab", time: "4:00 – 5:30 PM", color: T.danger },
-  ],
-  20: [{ t: "Group Project Report Due", time: "11:59 PM", color: "#D68A0C" }],
-};
+const EVENT_COLORS = [T.primary, "#D4AF37", "#009B77", "#046307", "#00674F", "#7FE0A8"];
 
 /* ------------------------------- UTILITIES ---------------------------------- */
+
+function ymKey(date) { return `${date.getFullYear()}-${date.getMonth()}`; }
+function dayKey(date) { return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`; }
+function monthLabel(date) { return date.toLocaleDateString(undefined, { month: "long", year: "numeric" }); }
+function toLocalInputValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -121,7 +162,7 @@ function ErrorBanner({ message }) {
 
 function CenterSpinner({ label }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "60px 20px", color: T.inkSoft }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, minHeight: "640px", background: T.bg, color: T.inkSoft, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
       <Loader2 size={22} color={T.primary} style={{ animation: "spin 1s linear infinite" }} />
       <span style={{ fontSize: 13 }}>{label}</span>
     </div>
@@ -130,9 +171,9 @@ function CenterSpinner({ label }) {
 
 const iconBtnStyle = { width: 36, height: 36, borderRadius: 12, border: `1px solid ${T.line}`, background: T.panel, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
 const screenBox = { padding: "0 20px 100px", display: "flex", flexDirection: "column", gap: 14 };
-const rowCardStyle = { display: "flex", alignItems: "center", gap: 12, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 14, padding: "13px 14px" };
+const rowCardStyle = { display: "flex", alignItems: "center", gap: 12, background: `linear-gradient(180deg, ${T.panel}, #EFF7F1)`, border: `1px solid ${T.line}`, borderRadius: 14, padding: "13px 14px" };
 const iconTileStyle = { width: 38, height: 38, borderRadius: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
-const primaryBtn = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: T.primary, color: "#fff", border: "none", borderRadius: 13, padding: "13px 16px", fontWeight: 700, fontSize: 14.5, cursor: "pointer" };
+const primaryBtn = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: `linear-gradient(135deg, #6FDA9C, ${T.primary})`, color: "#fff", border: "none", borderRadius: 13, padding: "13px 16px", fontWeight: 700, fontSize: 14.5, cursor: "pointer", boxShadow: `0 4px 16px ${T.primaryGlow}` };
 const secondaryBtn = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: T.panel, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 13, padding: "13px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer" };
 const inputStyle = { width: "100%", border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 14px", fontSize: 14, color: T.ink, background: T.panel, boxSizing: "border-box" };
 const selectStyle = { ...inputStyle, appearance: "none", cursor: "pointer" };
@@ -156,11 +197,129 @@ function QuickAction({ icon: Icon, label, onClick }) {
 
 /* --------------------------------- AUTH SCREEN --------------------------------- */
 
+const LEGAL_CONTENT = {
+  terms: {
+    title: "Terms of Service",
+    body: `Last updated: [DATE]
+
+By creating an account or using Orbit, you agree to these Terms.
+
+# Eligibility
+You must be at least 13 years old (or 16 in the EEA/UK, where required) to use Orbit.
+
+# Your account
+You're responsible for keeping your password secure and for activity under your account. An email address is optional at signup — without one, account recovery (e.g. a forgotten password) may not be possible.
+
+# Your content
+You keep ownership of what you create in Orbit. By uploading content, you grant us a limited license to store, process, and display it back to you — including sending images you upload to our AI provider (Anthropic) to generate suggested titles, tags, and summaries.
+
+Don't upload anything that infringes someone else's rights, is illegal or abusive, or contains malware.
+
+# AI features
+Photo-tagging suggestions are AI-generated and may be inaccurate or incomplete. You're responsible for reviewing them before relying on them.
+
+# Groups
+Other members of a group you join can see messages you post there. We're not responsible for other users' conduct.
+
+# Service availability
+We aim to keep Orbit reliable, but don't guarantee uninterrupted access. Features marked "coming soon" aren't available yet and may change.
+
+# Termination
+You can stop using Orbit anytime. We may suspend accounts that violate these Terms. You can request account deletion at any time.
+
+# Disclaimers
+The Service is provided "as is," without warranties of any kind, including that AI suggestions will be accurate.
+
+# Limitation of liability
+To the maximum extent permitted by law, we are not liable for indirect, incidental, or consequential damages arising from your use of the Service.
+
+# Governing law
+These Terms are governed by the laws of [YOUR COUNTRY/STATE].
+
+# Changes
+We may update these Terms; continued use after changes means you accept them.
+
+# Contact
+Questions? Reach us at [YOUR CONTACT EMAIL].
+
+This is a summary for in-app display. The full Terms of Service document governs.`,
+  },
+  privacy: {
+    title: "Privacy Policy",
+    body: `Last updated: [DATE]
+
+This explains what Orbit collects and how we use it.
+
+# What we collect
+Account info: username (required), password (hashed, never stored in plain text), full name and email (both optional).
+
+Your content: folders, archive items (including photos you upload), tasks, reminders, calendar events, study session logs, and group messages.
+
+Technical data: IP address (for rate limiting, not tracking), basic server logs, and a single auth token in your browser's local storage to keep you signed in.
+
+We don't use advertising cookies or third-party tracking scripts.
+
+# How we use it
+To provide the Service, process photos you upload for AI tagging, send account emails (verification, password reset) if you've linked an email, and prevent abuse.
+
+# AI processing
+Photos you upload through the capture feature are sent to Anthropic (Claude's maker) for analysis. Only images you actively upload are sent — nothing happens automatically in the background.
+
+# Other services we use
+Hosting and database providers to run Orbit, and an email provider for account emails, if configured. We don't sell your data or share it for others' marketing.
+
+# Security
+Passwords are hashed (bcrypt), sessions use signed tokens with expiration, and we rate-limit sensitive endpoints. No method is 100% secure.
+
+# Your rights
+Depending on where you live, you may have rights to access, correct, delete, or export your data. Contact us at [YOUR CONTACT EMAIL] to exercise these.
+
+# Children's privacy
+Orbit isn't directed at children under 13 (or 16 in the EEA/UK). Contact us if you believe a child has created an account.
+
+# Changes
+We'll update the date above if this policy changes materially.
+
+# Contact
+[YOUR CONTACT EMAIL]
+
+This is a summary for in-app display. The full Privacy Policy document governs.`,
+  },
+};
+
+function renderLegalText(text) {
+  return text.split("\n").map((line, i) => {
+    if (line.startsWith("# ")) {
+      return <div key={i} style={{ fontSize: 14, fontWeight: 800, color: T.ink, marginTop: 16, marginBottom: 4 }}>{line.slice(2)}</div>;
+    }
+    if (!line.trim()) return <div key={i} style={{ height: 4 }} />;
+    return <div key={i} style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.6 }}>{line}</div>;
+  });
+}
+
+function LegalModal({ type, onClose }) {
+  const doc = LEGAL_CONTENT[type];
+  if (!doc) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(8,28,19,0.6)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 420, maxHeight: "80vh", display: "flex", flexDirection: "column", ...STARFIELD_BG }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px 12px", borderBottom: `1px solid ${T.line}` }}>
+          <span style={{ fontWeight: 800, fontSize: 16, color: T.ink }}>{doc.title}</span>
+          <button onClick={onClose} style={iconBtnStyle}><X size={16} color={T.ink} /></button>
+        </div>
+        <div style={{ padding: "12px 20px 28px", overflowY: "auto" }}>{renderLegalText(doc.body)}</div>
+      </div>
+    </div>
+  );
+}
+
 function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState("login"); // login | register | forgot
+  const [username, setUsername] = useState("");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [agreed, setAgreed] = useState(false);
+  const [legalModal, setLegalModal] = useState(null); // null | "terms" | "privacy"
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [forgotSent, setForgotSent] = useState(false);
@@ -172,7 +331,7 @@ function AuthScreen({ onAuthed }) {
 
     if (mode === "forgot") {
       try {
-        await api.forgotPassword({ email });
+        await api.forgotPassword({ username });
         setForgotSent(true);
       } catch (err) {
         // Still show the generic success state — the backend already
@@ -186,7 +345,9 @@ function AuthScreen({ onAuthed }) {
     }
 
     try {
-      const payload = mode === "login" ? { email, password } : { name, email, password };
+      const payload = mode === "login"
+        ? { username, password }
+        : { username, password, accept_terms: agreed, ...(name.trim() && { name: name.trim() }) };
       const data = mode === "login" ? await api.login(payload) : await api.register(payload);
       api.setToken(data.access_token);
       onAuthed(data.user);
@@ -204,11 +365,10 @@ function AuthScreen({ onAuthed }) {
   }
 
   return (
-    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto" }}>
+    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
+      {legalModal && <LegalModal type={legalModal} onClose={() => setLegalModal(null)} />}
       <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 30 }}>
-        <div style={{ width: 42, height: 42, borderRadius: 12, background: T.primary, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <OrbitIcon size={22} color="#fff" />
-        </div>
+        <OrbitCatLogo size={46} />
         <span style={{ fontWeight: 800, fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>ORBIT</span>
       </div>
 
@@ -216,13 +376,13 @@ function AuthScreen({ onAuthed }) {
         {mode === "login" ? "Welcome back" : mode === "register" ? "Create your account" : "Reset your password"}
       </h2>
       <p style={{ textAlign: "center", fontSize: 12.5, color: T.inkFaint, margin: "0 0 22px" }}>
-        {mode === "login" ? "Sign in to access your archive" : mode === "register" ? "Start organizing everything in one place" : "We'll email you a link to choose a new one"}
+        {mode === "login" ? "Sign in to access your archive" : mode === "register" ? "Just a username and a password to start — add an email later if you want" : "Enter your username and we'll email a reset link if one's linked to your account"}
       </p>
 
       {mode === "forgot" && forgotSent ? (
         <div style={{ textAlign: "center" }}>
           <div style={{ background: T.primarySoft, border: `1px solid #DCD3F8`, borderRadius: 14, padding: "16px 18px", fontSize: 13.5, color: T.ink, lineHeight: 1.6 }}>
-            If an account exists for <strong>{email}</strong>, a reset link is on its way. Check your inbox.
+            If <strong>{username}</strong> has an email on file, a reset link is on its way there.
           </div>
           <span onClick={() => switchMode("login")} style={{ display: "inline-block", marginTop: 18, color: T.primary, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
             Back to sign in
@@ -230,22 +390,43 @@ function AuthScreen({ onAuthed }) {
         </div>
       ) : (
         <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <FieldLabel icon={User}>Username</FieldLabel>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              style={inputStyle}
+              placeholder="alexm"
+              autoCapitalize="none"
+              autoCorrect="off"
+            />
+          </div>
+
           {mode === "register" && (
             <div>
-              <FieldLabel icon={User}>Full name</FieldLabel>
-              <input value={name} onChange={(e) => setName(e.target.value)} required style={inputStyle} placeholder="Alex Morgan" />
+              <FieldLabel icon={User}>Full name <span style={{ fontWeight: 500, color: T.inkFaint }}>(optional)</span></FieldLabel>
+              <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} placeholder="Alex Morgan" />
             </div>
           )}
-          <div>
-            <FieldLabel icon={Mail}>Email</FieldLabel>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={inputStyle} placeholder="you@school.edu" />
-          </div>
 
           {mode !== "forgot" && (
             <div>
               <FieldLabel icon={KeyRound}>Password</FieldLabel>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} style={inputStyle} placeholder="At least 8 characters" />
             </div>
+          )}
+
+          {mode === "register" && (
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: T.inkSoft, lineHeight: 1.5, cursor: "pointer" }}>
+              <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} style={{ marginTop: 2, accentColor: T.primary }} />
+              <span>
+                I agree to the{" "}
+                <span onClick={(e) => { e.preventDefault(); setLegalModal("terms"); }} style={{ color: T.primary, fontWeight: 700, cursor: "pointer" }}>Terms of Service</span>
+                {" "}and{" "}
+                <span onClick={(e) => { e.preventDefault(); setLegalModal("privacy"); }} style={{ color: T.primary, fontWeight: 700, cursor: "pointer" }}>Privacy Policy</span>
+              </span>
+            </label>
           )}
 
           {mode === "login" && (
@@ -256,7 +437,7 @@ function AuthScreen({ onAuthed }) {
 
           <ErrorBanner message={error} />
 
-          <button type="submit" disabled={loading} style={{ ...primaryBtn, opacity: loading ? 0.6 : 1, marginTop: 6 }}>
+          <button type="submit" disabled={loading || (mode === "register" && !agreed)} style={{ ...primaryBtn, opacity: loading || (mode === "register" && !agreed) ? 0.6 : 1, marginTop: 6 }}>
             {loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : (mode === "login" ? "Sign in" : mode === "register" ? "Create account" : "Send reset link")}
           </button>
         </form>
@@ -277,7 +458,13 @@ function AuthScreen({ onAuthed }) {
         </div>
       )}
 
-      <div style={{ textAlign: "center", marginTop: 26, fontSize: 11, color: T.inkFaint }}>
+      <div style={{ textAlign: "center", marginTop: 18, fontSize: 11, color: T.inkFaint }}>
+        <span onClick={() => setLegalModal("terms")} style={{ cursor: "pointer", textDecoration: "underline" }}>Terms</span>
+        {" · "}
+        <span onClick={() => setLegalModal("privacy")} style={{ cursor: "pointer", textDecoration: "underline" }}>Privacy</span>
+      </div>
+
+      <div style={{ textAlign: "center", marginTop: 10, fontSize: 11, color: T.inkFaint }}>
         Connecting to <code>{api.base}</code>
       </div>
     </div>
@@ -310,11 +497,9 @@ function ResetPasswordScreen({ token, onDone }) {
   }
 
   return (
-    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto" }}>
+    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 30 }}>
-        <div style={{ width: 42, height: 42, borderRadius: 12, background: T.primary, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <OrbitIcon size={22} color="#fff" />
-        </div>
+        <OrbitCatLogo size={46} />
         <span style={{ fontWeight: 800, fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>ORBIT</span>
       </div>
 
@@ -399,7 +584,7 @@ function VerifyPendingScreen({ user, onVerified, onLogout }) {
   }
 
   return (
-    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", textAlign: "center" }}>
+    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", textAlign: "center", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
       <div style={{ width: 64, height: 64, borderRadius: 18, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 22 }}>
         <Mail size={28} color={T.primary} />
       </div>
@@ -446,7 +631,7 @@ function HomeScreen({ folders, tasks, go, user }) {
     <div>
       <div style={{ padding: "18px 20px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: T.ink, letterSpacing: -0.4 }}>Good morning, {user.name.split(" ")[0]} 👋</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: T.ink, letterSpacing: -0.4 }}>Good morning, {(user.name || user.username).split(" ")[0]} 👋</div>
           <div style={{ color: T.inkSoft, fontSize: 14, marginTop: 2 }}>Stay productive today.</div>
         </div>
         <button onClick={() => go("reminders")} style={{ ...iconBtnStyle, position: "relative" }}>
@@ -695,13 +880,72 @@ function CaptureScreen({ back, onSave, folders }) {
   );
 }
 
-function CalendarScreen({ back }) {
-  const [selected, setSelected] = useState(15);
-  const cells = [...Array(4).fill(null), ...Array.from({ length: 31 }, (_, i) => i + 1)];
-  const events = MAY_EVENTS[selected] || [];
+function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
+  const [month, setMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
+  const [selected, setSelected] = useState(() => new Date());
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const eventsByDay = {};
+  events.forEach((ev) => {
+    const k = dayKey(new Date(ev.start_time));
+    (eventsByDay[k] = eventsByDay[k] || []).push(ev);
+  });
+
+  const firstOfMonth = new Date(month.getFullYear(), month.getMonth(), 1);
+  const startOffset = firstOfMonth.getDay();
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const cells = [...Array(startOffset).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => new Date(month.getFullYear(), month.getMonth(), i + 1))];
+  const today = new Date();
+  const dayEvents = (eventsByDay[dayKey(selected)] || []).sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+
+  function shiftMonth(delta) {
+    const d = new Date(month);
+    d.setMonth(d.getMonth() + delta);
+    setMonth(d);
+  }
+
+  function openForm() {
+    const base = new Date(selected);
+    base.setHours(base.getHours() + 1, 0, 0, 0);
+    setStart(toLocalInputValue(base));
+    const endD = new Date(base);
+    endD.setHours(endD.getHours() + 1);
+    setEnd(toLocalInputValue(endD));
+    setTitle("");
+    setError("");
+    setShowForm(true);
+  }
+
+  async function saveEvent() {
+    if (!title.trim() || !start) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onAddEvent({
+        title: title.trim(),
+        start_time: new Date(start).toISOString(),
+        end_time: end ? new Date(end).toISOString() : null,
+        color: EVENT_COLORS[events.length % EVENT_COLORS.length],
+      });
+      setShowForm(false);
+    } catch (err) {
+      setError(err.message || "Couldn't save event.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div>
-      <TopBar title="May 2025" onBack={back} />
+      <TopBar title={monthLabel(month)} onBack={back} right={<>
+        <button onClick={() => shiftMonth(-1)} style={iconBtnStyle}><ChevronLeft size={16} color={T.ink} /></button>
+        <button onClick={() => shiftMonth(1)} style={iconBtnStyle}><ChevronRight size={16} color={T.ink} /></button>
+      </>} />
       <div style={screenBox}>
         <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 16, padding: 14 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 }}>
@@ -709,25 +953,56 @@ function CalendarScreen({ back }) {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}>
             {cells.map((d, i) => {
-              const hasEvent = d && MAY_EVENTS[d];
-              const isSel = d === selected;
+              const hasEvent = d && eventsByDay[dayKey(d)];
+              const isSel = d && dayKey(d) === dayKey(selected);
+              const isToday = d && dayKey(d) === dayKey(today);
               return (
-                <div key={i} onClick={() => d && setSelected(d)} style={{ aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, fontSize: 12.5, fontWeight: isSel ? 800 : 500, cursor: d ? "pointer" : "default", background: isSel ? T.primary : "transparent", color: isSel ? "#fff" : d ? T.ink : "transparent", position: "relative" }}>
-                  {d}
+                <div key={i} onClick={() => d && setSelected(d)} style={{ aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, fontSize: 12.5, fontWeight: isSel ? 800 : 500, cursor: d ? "pointer" : "default", background: isSel ? T.primary : "transparent", color: isSel ? "#fff" : d ? T.ink : "transparent", position: "relative", border: isToday && !isSel ? `1px solid ${T.primary}` : "none" }}>
+                  {d && d.getDate()}
                   {hasEvent && !isSel && <span style={{ position: "absolute", bottom: 3, width: 4, height: 4, borderRadius: 99, background: T.primary }} />}
                 </div>
               );
             })}
           </div>
         </div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 6 }}>May {selected}, 2025</div>
-        {events.length === 0 && <div style={{ fontSize: 13, color: T.inkFaint, padding: "10px 0" }}>No events scheduled.</div>}
-        {events.map((ev, i) => (
-          <div key={i} style={rowCardStyle}>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>{selected.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</div>
+          <span onClick={openForm} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 700, color: T.primary, cursor: "pointer" }}><Plus size={14} /> Add event</span>
+        </div>
+
+        {dayEvents.length === 0 && <div style={{ fontSize: 13, color: T.inkFaint, padding: "10px 0" }}>No events scheduled.</div>}
+        {dayEvents.map((ev) => (
+          <div key={ev.id} style={rowCardStyle}>
             <div style={{ width: 4, height: 34, borderRadius: 4, background: ev.color }} />
-            <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{ev.t}</div><div style={{ fontSize: 12, color: T.inkFaint }}>{ev.time}</div></div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{ev.title}</div>
+              <div style={{ fontSize: 12, color: T.inkFaint }}>
+                {new Date(ev.start_time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                {ev.end_time && ` – ${new Date(ev.end_time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`}
+              </div>
+            </div>
+            <X size={15} color={T.inkFaint} style={{ cursor: "pointer" }} onClick={() => onDeleteEvent(ev.id)} />
           </div>
         ))}
+
+        {showForm && (
+          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+            <FieldLabel>Title</FieldLabel>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Math 21 Quiz" style={inputStyle} autoFocus />
+            <FieldLabel>Starts</FieldLabel>
+            <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} style={inputStyle} />
+            <FieldLabel>Ends <span style={{ fontWeight: 500, color: T.inkFaint }}>(optional)</span></FieldLabel>
+            <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} style={inputStyle} />
+            <ErrorBanner message={error} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setShowForm(false)} style={{ ...secondaryBtn, flex: 1 }}>Cancel</button>
+              <button onClick={saveEvent} disabled={saving || !title.trim()} style={{ ...primaryBtn, flex: 1, opacity: saving || !title.trim() ? 0.6 : 1 }}>
+                {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Save"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -771,19 +1046,81 @@ function TodoScreen({ tasks, back, onToggle, onAdd }) {
   );
 }
 
-function GroupScreen({ back, user }) {
+function GroupsListScreen({ back, groups, go, onCreate, onJoin }) {
+  const [mode, setMode] = useState(null); // null | "create" | "join"
+  const [input, setInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit() {
+    if (!input.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      if (mode === "create") await onCreate(input.trim());
+      else await onJoin(input.trim());
+      setMode(null);
+      setInput("");
+    } catch (err) {
+      setError(err.message || "Something went wrong.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div>
+      <TopBar title="Groups" />
+      <div style={screenBox}>
+        {groups.length === 0 && !mode && <div style={{ fontSize: 13, color: T.inkFaint, padding: "10px 0" }}>You're not in any groups yet.</div>}
+        {groups.map((g) => (
+          <div key={g.id} onClick={() => go("group", g.id)} style={{ ...rowCardStyle, cursor: "pointer" }}>
+            <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><Users size={18} /></div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>{g.name}</div>
+              <div style={{ fontSize: 12, color: T.inkFaint }}>{g.member_count} member{g.member_count === 1 ? "" : "s"} · code {g.invite_code}</div>
+            </div>
+            <ChevronRight size={17} color={T.inkFaint} />
+          </div>
+        ))}
+
+        {mode ? (
+          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+            <FieldLabel>{mode === "create" ? "Group name" : "Invite code"}</FieldLabel>
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={mode === "create" ? "Study Group" : "8-character code"} style={inputStyle} autoFocus onKeyDown={(e) => e.key === "Enter" && submit()} />
+            <ErrorBanner message={error} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setMode(null); setError(""); }} style={{ ...secondaryBtn, flex: 1 }}>Cancel</button>
+              <button onClick={submit} disabled={saving || !input.trim()} style={{ ...primaryBtn, flex: 1, opacity: saving || !input.trim() ? 0.6 : 1 }}>
+                {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : mode === "create" ? "Create" : "Join"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button onClick={() => setMode("create")} style={{ ...primaryBtn, flex: 1 }}><Plus size={16} /> New group</button>
+            <button onClick={() => setMode("join")} style={{ ...secondaryBtn, flex: 1 }}>Join with code</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GroupScreen({ back, user, group }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [connected, setConnected] = useState(false);
   const [authFailed, setAuthFailed] = useState(false);
+  const [showCode, setShowCode] = useState(false);
   const wsRef = useRef(null);
   const scrollRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
-    api.groups.messages(DEMO_GROUP_ID).then((history) => { if (!cancelled) setMessages(history || []); }).catch(() => {});
+    api.groups.messages(group.id).then((history) => { if (!cancelled) setMessages(history || []); }).catch(() => {});
 
-    const ws = new WebSocket(api.wsURL(DEMO_GROUP_ID));
+    const ws = new WebSocket(api.wsURL(group.id));
     wsRef.current = ws;
     ws.onopen = () => setConnected(true);
     ws.onclose = (evt) => {
@@ -796,7 +1133,7 @@ function GroupScreen({ back, user }) {
       setMessages((prev) => [...prev, msg]);
     };
     return () => { cancelled = true; ws.close(); };
-  }, []);
+  }, [group.id]);
 
   useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight); }, [messages]);
 
@@ -810,11 +1147,19 @@ function GroupScreen({ back, user }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <TopBar title="Study Group" onBack={back} right={<span style={{ fontSize: 11, fontWeight: 700, color: connected ? "#0E9F6E" : T.inkFaint, alignSelf: "center" }}>{connected ? "● live" : "connecting…"}</span>} />
+      <TopBar title={group.name} onBack={back} right={<>
+        <span style={{ fontSize: 11, fontWeight: 700, color: connected ? "#0E9F6E" : T.inkFaint, alignSelf: "center", marginRight: 4 }}>{connected ? "● live" : "connecting…"}</span>
+        <button onClick={() => setShowCode((s) => !s)} style={iconBtnStyle}><Users size={15} color={T.ink} /></button>
+      </>} />
+      {showCode && (
+        <div style={{ margin: "0 20px 10px", fontSize: 12, color: T.inkSoft, background: T.primarySoft, borderRadius: 10, padding: "8px 12px" }}>
+          Invite code: <strong>{group.invite_code}</strong> · {group.member_count} member{group.member_count === 1 ? "" : "s"}
+        </div>
+      )}
       {authFailed && <div style={{ margin: "0 20px 10px" }}><ErrorBanner message="Your session couldn't be verified for chat. Try signing out and back in." /></div>}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 20px", display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map((m) => {
-          const mine = m.sender_name === user.name;
+          const mine = m.sender_name === (user.name || user.username);
           return (
             <div key={m.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "78%" }}>
               {!mine && <div style={{ fontSize: 11, fontWeight: 700, color: T.primary, marginBottom: 2 }}>{m.sender_name}</div>}
@@ -832,14 +1177,68 @@ function GroupScreen({ back, user }) {
   );
 }
 
-function InsightsScreen({ back, tasks }) {
+function InsightsScreen({ back, tasks, studySessions, onLogSession }) {
+  const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0); // seconds
+  const [saving, setSaving] = useState(false);
+  const startRef = useRef(null);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (running) {
+      startRef.current = Date.now() - elapsed * 1000;
+      intervalRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000);
+    }
+    return () => clearInterval(intervalRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
+  async function stopAndLog() {
+    setRunning(false);
+    clearInterval(intervalRef.current);
+    const minutes = Math.max(1, Math.round(elapsed / 60));
+    setSaving(true);
+    try {
+      await onLogSession(minutes);
+    } finally {
+      setElapsed(0);
+      setSaving(false);
+    }
+  }
+
   const done = tasks.filter((t) => t.done).length;
   const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
-  const maxHours = Math.max(...weeklyStudy.map((d) => d.hours));
+
+  const now = new Date();
+  const last7 = Array.from({ length: 7 }, (_, i) => { const d = new Date(now); d.setDate(d.getDate() - (6 - i)); return d; });
+  const minutesByDay = {};
+  studySessions.forEach((s) => {
+    const k = dayKey(new Date(s.started_at));
+    minutesByDay[k] = (minutesByDay[k] || 0) + s.minutes;
+  });
+  const weekData = last7.map((d) => ({ day: d.toLocaleDateString(undefined, { weekday: "short" })[0], minutes: minutesByDay[dayKey(d)] || 0 }));
+  const maxMinutes = Math.max(1, ...weekData.map((d) => d.minutes));
+  const totalMinutes = weekData.reduce((sum, d) => sum + d.minutes, 0);
+  const totalLabel = totalMinutes >= 60 ? `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m` : `${totalMinutes}m`;
+
+  const timerLabel = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+
   return (
     <div>
       <TopBar title="Insights" onBack={back} />
       <div style={screenBox}>
+        <div style={{ ...rowCardStyle, flexDirection: "column", gap: 10, padding: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study timer</div>
+          <div style={{ fontSize: 34, fontWeight: 800, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{timerLabel}</div>
+          {!running ? (
+            <button onClick={() => setRunning(true)} style={primaryBtn}>Start studying</button>
+          ) : (
+            <button onClick={stopAndLog} disabled={saving} style={{ ...primaryBtn, background: T.danger, opacity: saving ? 0.6 : 1 }}>
+              {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Stop & log session"}
+            </button>
+          )}
+        </div>
+
         <div style={{ display: "flex", gap: 12 }}>
           <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", flex: 1, gap: 6, padding: "16px 10px" }}>
             <div style={{ position: "relative" }}>
@@ -850,16 +1249,17 @@ function InsightsScreen({ back, tasks }) {
           </div>
           <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "flex-start", flex: 1, gap: 6, padding: "16px 14px", justifyContent: "center" }}>
             <TrendingUp size={18} color="#0E9F6E" />
-            <div style={{ fontSize: 20, fontWeight: 800, color: T.ink }}>14h 30m</div>
-            <div style={{ fontSize: 11.5, color: "#0E9F6E", fontWeight: 700 }}>Sample data</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.ink }}>{totalLabel}</div>
+            <div style={{ fontSize: 11.5, color: T.inkFaint, fontWeight: 700 }}>Last 7 days</div>
           </div>
         </div>
+
         <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 14, padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study time this week</div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 100 }}>
-            {weeklyStudy.map((d) => (
-              <div key={d.day} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <div style={{ width: "100%", borderRadius: 6, background: T.primary, height: `${(d.hours / maxHours) * 80}px`, opacity: 0.85 }} />
+            {weekData.map((d, i) => (
+              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                <div style={{ width: "100%", borderRadius: 6, background: T.primary, height: `${Math.max(4, (d.minutes / maxMinutes) * 80)}px`, opacity: 0.85 }} />
                 <div style={{ fontSize: 10.5, color: T.inkFaint, fontWeight: 600 }}>{d.day}</div>
               </div>
             ))}
@@ -906,7 +1306,29 @@ function RemindersScreen({ back, reminders, onAdd }) {
   );
 }
 
-function ProfileScreen({ back, user, onLogout }) {
+function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
+  const [emailInput, setEmailInput] = useState("");
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState("");
+  const [legalModal, setLegalModal] = useState(null); // null | "terms" | "privacy"
+
+  async function linkEmail(e) {
+    e.preventDefault();
+    setLinking(true);
+    setLinkError("");
+    try {
+      const updated = await api.linkEmail({ email: emailInput.trim() });
+      onUserUpdate(updated);
+      // Note: this immediately routes to the "check your email" screen at
+      // the App level, since that screen triggers whenever a linked email
+      // isn't verified yet — same behavior as a fresh signup with an email.
+    } catch (err) {
+      setLinkError(err.message || "Couldn't link that email.");
+    } finally {
+      setLinking(false);
+    }
+  }
+
   const premium = [
     { icon: Mic, title: "Voice Commands", desc: "\u201cArchive this under Biology.\u201d" },
     { icon: LayoutGrid, title: "Home Screen Widgets", desc: "Quick access to tasks, events, recent captures" },
@@ -917,15 +1339,49 @@ function ProfileScreen({ back, user, onLogout }) {
   return (
     <div>
       <TopBar title="Profile" onBack={back} />
+      {legalModal && <LegalModal type={legalModal} onClose={() => setLegalModal(null)} />}
       <div style={screenBox}>
         <div style={{ ...rowCardStyle, gap: 14 }}>
-          <div style={{ width: 50, height: 50, borderRadius: 999, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", color: T.primary, fontWeight: 800, fontSize: 18 }}>{user.name[0]}</div>
-          <div><div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>{user.name}</div><div style={{ fontSize: 12.5, color: T.inkFaint }}>{user.email}</div></div>
+          <div style={{ width: 50, height: 50, borderRadius: 999, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", color: T.primary, fontWeight: 800, fontSize: 18 }}>{(user.name || user.username)[0].toUpperCase()}</div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>{user.name || user.username}</div>
+            <div style={{ fontSize: 12.5, color: T.inkFaint }}>@{user.username}</div>
+          </div>
         </div>
+
+        {user.email ? (
+          <div style={rowCardStyle}>
+            <Mail size={17} color={T.inkSoft} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13.5, color: T.ink }}>{user.email}</div>
+              <div style={{ fontSize: 11.5, color: user.is_verified ? "#0E9F6E" : T.inkFaint }}>{user.is_verified ? "Verified" : "Verification pending"}</div>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={linkEmail} style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+            <FieldLabel icon={Mail}>Add an email (optional)</FieldLabel>
+            <div style={{ fontSize: 12, color: T.inkFaint, marginTop: -6 }}>Lets you recover your account if you forget your password.</div>
+            <input type="email" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} placeholder="you@school.edu" style={inputStyle} />
+            {linkError && <ErrorBanner message={linkError} />}
+            <button type="submit" disabled={linking || !emailInput.trim()} style={{ ...secondaryBtn, opacity: linking || !emailInput.trim() ? 0.6 : 1 }}>
+              {linking ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : "Link email"}
+            </button>
+          </form>
+        )}
 
         <div onClick={onLogout} style={{ ...rowCardStyle, cursor: "pointer" }}>
           <LogOut size={17} color={T.danger} />
           <div style={{ fontSize: 13.5, color: T.danger, fontWeight: 700 }}>Sign out</div>
+        </div>
+
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 10 }}>Legal</div>
+        <div onClick={() => setLegalModal("terms")} style={{ ...rowCardStyle, cursor: "pointer" }}>
+          <FileText size={17} color={T.inkSoft} />
+          <div style={{ fontSize: 13.5, color: T.ink }}>Terms of Service</div>
+        </div>
+        <div onClick={() => setLegalModal("privacy")} style={{ ...rowCardStyle, cursor: "pointer" }}>
+          <Lock size={17} color={T.inkSoft} />
+          <div style={{ fontSize: 13.5, color: T.ink }}>Privacy Policy</div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 10 }}>
@@ -948,34 +1404,44 @@ function ProfileScreen({ back, user, onLogout }) {
 const NAV_ITEMS = [
   { key: "home", label: "Home", icon: Home }, { key: "archive", label: "Archive", icon: FolderOpen },
   { key: "calendar", label: "Calendar", icon: CalendarIcon }, { key: "todo", label: "Tasks", icon: ListTodo },
-  { key: "group", label: "Groups", icon: Users }, { key: "insights", label: "Insights", icon: BarChart3 },
+  { key: "groupslist", label: "Groups", icon: Users }, { key: "insights", label: "Insights", icon: BarChart3 },
   { key: "reminders", label: "Reminders", icon: Bell }, { key: "profile", label: "Profile", icon: User },
 ];
 const MOBILE_NAV = [
   { key: "home", icon: Home, label: "Home" }, { key: "archive", icon: FolderOpen, label: "Archive" },
-  { key: "capture", icon: Plus, label: "" }, { key: "group", icon: Users, label: "Groups" },
+  { key: "capture", icon: Plus, label: "" }, { key: "groupslist", icon: Users, label: "Groups" },
   { key: "profile", icon: User, label: "Profile" },
 ];
 
-function MainShell({ user, onLogout }) {
+function MainShell({ user, onLogout, onUserUpdate }) {
   const [screen, setScreen] = useState("home");
   const [activeFolder, setActiveFolder] = useState(null);
+  const [activeGroupId, setActiveGroupId] = useState(null);
   const [folders, setFolders] = useState({});
   const [tasks, setTasks] = useState([]);
   const [reminders, setReminders] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [studySessions, setStudySessions] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.folders.list(), api.tasks.list(), api.reminders.list()])
-      .then(([f, t, r]) => {
+    Promise.all([
+      api.folders.list(), api.tasks.list(), api.reminders.list(),
+      api.events.list(), api.studySessions.list(), api.groups.list(),
+    ])
+      .then(([f, t, r, ev, ss, gr]) => {
         if (cancelled) return;
         const byName = {};
         f.forEach((folder) => { byName[folder.name] = folder; });
         setFolders(byName);
         setTasks(t);
         setReminders(r);
+        setEvents(ev);
+        setStudySessions(ss);
+        setGroups(gr);
       })
       .catch((err) => !cancelled && setError(err.message))
       .finally(() => !cancelled && setLoading(false));
@@ -984,6 +1450,7 @@ function MainShell({ user, onLogout }) {
 
   function go(target, param) {
     if (target === "folder") setActiveFolder(param);
+    if (target === "group") setActiveGroupId(param);
     setScreen(target);
   }
 
@@ -1014,6 +1481,37 @@ function MainShell({ user, onLogout }) {
     setReminders((prev) => [created, ...prev]);
   }
 
+  async function addEvent(payload) {
+    const created = await api.events.create(payload);
+    setEvents((prev) => [...prev, created]);
+  }
+
+  async function deleteEvent(id) {
+    await api.events.delete(id);
+    setEvents((prev) => prev.filter((e) => e.id !== id));
+  }
+
+  async function logStudySession(minutes) {
+    const created = await api.studySessions.create({ minutes });
+    setStudySessions((prev) => [created, ...prev]);
+  }
+
+  async function createGroup(name) {
+    const created = await api.groups.create({ name });
+    setGroups((prev) => [...prev, created]);
+    setActiveGroupId(created.id);
+    setScreen("group");
+  }
+
+  async function joinGroup(inviteCode) {
+    const joined = await api.groups.join({ invite_code: inviteCode });
+    setGroups((prev) => (prev.some((g) => g.id === joined.id) ? prev : [...prev, joined]));
+    setActiveGroupId(joined.id);
+    setScreen("group");
+  }
+
+  const activeGroup = groups.find((g) => g.id === activeGroupId);
+
   function renderScreen() {
     if (loading) return <CenterSpinner label="Loading your archive…" />;
     if (error) return <div style={{ padding: 20 }}><ErrorBanner message={error} /></div>;
@@ -1023,25 +1521,28 @@ function MainShell({ user, onLogout }) {
       case "archive": return <ArchiveScreen folders={folders} go={go} />;
       case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} />;
       case "capture": return <CaptureScreen back={() => setScreen("home")} onSave={saveItem} folders={folders} />;
-      case "calendar": return <CalendarScreen back={() => setScreen("home")} />;
+      case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} />;
       case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} />;
-      case "group": return <GroupScreen back={() => setScreen("home")} user={user} />;
-      case "insights": return <InsightsScreen back={() => setScreen("home")} tasks={tasks} />;
+      case "groupslist": return <GroupsListScreen groups={groups} go={go} onCreate={createGroup} onJoin={joinGroup} />;
+      case "group": return activeGroup
+        ? <GroupScreen back={() => setScreen("groupslist")} user={user} group={activeGroup} />
+        : <CenterSpinner label="Loading group…" />;
+      case "insights": return <InsightsScreen back={() => setScreen("home")} tasks={tasks} studySessions={studySessions} onLogSession={logStudySession} />;
       case "reminders": return <RemindersScreen back={() => setScreen("home")} reminders={reminders} onAdd={addReminder} />;
-      case "profile": return <ProfileScreen back={() => setScreen("home")} user={user} onLogout={onLogout} />;
+      case "profile": return <ProfileScreen back={() => setScreen("home")} user={user} onLogout={onLogout} onUserUpdate={onUserUpdate} />;
       default: return null;
     }
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "640px", background: T.bg, fontFamily: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" }}>
+    <div style={{ display: "flex", minHeight: "640px", background: T.bg, fontFamily: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif", ...STARFIELD_BG }}>
       <div className="orbit-sidebar" style={{ width: 220, background: T.sidebar, padding: "22px 14px", flexShrink: 0, display: "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px 26px" }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: T.primary, display: "flex", alignItems: "center", justifyContent: "center" }}><OrbitIcon size={16} color="#fff" /></div>
+          <OrbitCatLogo size={34} />
           <span style={{ color: "#fff", fontWeight: 800, fontSize: 16, letterSpacing: -0.3 }}>ORBIT</span>
         </div>
         {NAV_ITEMS.map((n) => (
-          <div key={n.key} onClick={() => go(n.key)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 11, cursor: "pointer", marginBottom: 3, background: screen === n.key ? T.sidebarSoft : "transparent", color: screen === n.key ? "#fff" : "#9188AD" }}>
+          <div key={n.key} onClick={() => go(n.key)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 11, cursor: "pointer", marginBottom: 3, background: screen === n.key ? T.sidebarSoft : "transparent", color: screen === n.key ? "#fff" : "#7FA08C" }}>
             <n.icon size={16} /><span style={{ fontSize: 13.5, fontWeight: 600 }}>{n.label}</span>
           </div>
         ))}
@@ -1050,10 +1551,10 @@ function MainShell({ user, onLogout }) {
 
       <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
         <div className="orbit-frame" style={{ width: "100%", maxWidth: 420, background: T.bg, position: "relative", minHeight: "640px" }}>
-          {renderScreen()}
+          <div key={screen} style={{ animation: "fadeIn 0.32s ease" }}>{renderScreen()}</div>
           <div className="orbit-bottomnav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 420, margin: "0 auto", background: T.panel, borderTop: `1px solid ${T.line}`, padding: "10px 22px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             {MOBILE_NAV.map((n) => n.key === "capture" ? (
-              <div key={n.key} onClick={() => go(n.key)} style={{ width: 46, height: 46, borderRadius: 999, background: T.primary, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: "0 6px 14px rgba(91,63,224,0.35)" }}>
+              <div key={n.key} onClick={() => go(n.key)} style={{ width: 46, height: 46, borderRadius: 999, background: `linear-gradient(135deg, #6FDA9C, ${T.primary})`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: `0 6px 18px ${T.primaryGlow}` }}>
                 <Plus size={20} color="#fff" />
               </div>
             ) : (
@@ -1067,7 +1568,6 @@ function MainShell({ user, onLogout }) {
       </div>
 
       <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
         @media (min-width: 860px) {
           .orbit-sidebar { display: block !important; }
           .orbit-bottomnav { display: none !important; }
@@ -1110,6 +1610,8 @@ export default function App() {
   if (resetToken) return <ResetPasswordScreen token={resetToken} onDone={clearResetToken} />;
   if (checking) return <CenterSpinner label="Checking your session…" />;
   if (!user) return <AuthScreen onAuthed={setUser} />;
-  if (!user.is_verified) return <VerifyPendingScreen user={user} onVerified={setUser} onLogout={handleLogout} />;
-  return <MainShell user={user} onLogout={handleLogout} />;
+  // Only gate on verification if there's actually an email pending
+  // verification — accounts with no email at all skip this entirely.
+  if (user.email && !user.is_verified) return <VerifyPendingScreen user={user} onVerified={setUser} onLogout={handleLogout} />;
+  return <MainShell user={user} onLogout={handleLogout} onUserUpdate={setUser} />;
 }
