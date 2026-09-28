@@ -401,6 +401,11 @@ function AuthScreen({ onAuthed }) {
               autoCapitalize="none"
               autoCorrect="off"
             />
+            {mode === "register" && (
+              <div style={{ fontSize: 11.5, color: T.inkFaint, marginTop: 6 }}>
+                3–30 characters: letters, numbers, and . _ - only (no spaces)
+              </div>
+            )}
           </div>
 
           {mode === "register" && (

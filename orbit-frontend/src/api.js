@@ -5,6 +5,26 @@ function getToken() {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+// FastAPI returns `detail` as a plain string for errors we raise ourselves
+// (e.g. "That username is already taken"), but as a LIST of objects for
+// request-validation failures (422). Passing that list straight to
+// `new Error()` stringifies it to "[object Object]", so unpack it here.
+function formatApiError(data, status) {
+  const detail = data && data.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail) && detail.length) {
+    return detail
+      .map((d) => {
+        // Pydantic prefixes messages raised from custom validators with
+        // "Value error, " — noise for an end user.
+        const msg = String((d && d.msg) || "Invalid value").replace(/^Value error,\s*/i, "");
+        return msg;
+      })
+      .join(" ");
+  }
+  return `Request failed (${status})`;
+}
+
 async function request(path, { method = "GET", body, auth = true } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (auth) {
@@ -28,7 +48,7 @@ async function request(path, { method = "GET", body, auth = true } = {}) {
   }
 
   if (!res.ok) {
-    throw new Error((data && data.detail) || `Request failed (${res.status})`);
+    throw new Error(formatApiError(data, res.status));
   }
   return data;
 }
