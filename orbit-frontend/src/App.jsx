@@ -1469,9 +1469,10 @@ function MainShell({ user, onLogout, onUserUpdate }) {
   }
 
   async function deleteItem(itemId) {
-    await api.items.delete(itemId);
-    setFolders((prev) => ({ ...prev, [activeFolder]: { ...prev[activeFolder], items: prev[activeFolder].items.filter((i) => i.id !== itemId) } }));
-  }
+  if (!window.confirm("Delete this item? This can't be undone.")) return;
+  await api.items.delete(itemId);
+  setFolders((prev) => ({ ...prev, [activeFolder]: { ...prev[activeFolder], items: prev[activeFolder].items.filter((i) => i.id !== itemId) } }));
+}
 
   async function toggleTask(task) {
     const updated = await api.tasks.update(task.id, { done: !task.done });
