@@ -933,8 +933,8 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
     try {
       await onAddEvent({
         title: title.trim(),
-        start_time: new Date(start).toISOString(),
-        end_time: end ? new Date(end).toISOString() : null,
+        start_time: start,
+        end_time: end || null,
         color: EVENT_COLORS[events.length % EVENT_COLORS.length],
       });
       setShowForm(false);
@@ -1123,7 +1123,9 @@ function GroupScreen({ back, user, group }) {
 
   useEffect(() => {
     let cancelled = false;
-    api.groups.messages(group.id).then((history) => { if (!cancelled) setMessages(history || []); }).catch(() => {});
+    api.groups.messages(group.id)
+  .then((history) => { if (!cancelled) setMessages((prev) => [...(history || []), ...prev]); })
+  .catch(() => {});
 
     const ws = new WebSocket(api.wsURL(group.id));
     wsRef.current = ws;
@@ -1519,7 +1521,14 @@ function MainShell({ user, onLogout, onUserUpdate }) {
 
   function renderScreen() {
     if (loading) return <CenterSpinner label="Loading your archive…" />;
-    if (error) return <div style={{ padding: 20 }}><ErrorBanner message={error} /></div>;
+    if (error) return (
+  <div style={{ padding: 20 }}>
+    <ErrorBanner message={error} />
+    <button onClick={() => window.location.reload()} style={{ ...secondaryBtn, marginTop: 12, width: "100%" }}>
+      Reload
+    </button>
+  </div>
+  );
 
     switch (screen) {
       case "home": return <HomeScreen folders={folders} tasks={tasks} go={go} user={user} />;
