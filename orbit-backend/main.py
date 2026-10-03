@@ -129,37 +129,41 @@ def register(request: Request, payload: schemas.UserCreate, db: Session = Depend
     user = models.User(
         username=payload.username,
         name=payload.name or payload.username,
-        email=payload.email,
+        email=payload.email,  # may be None — column is nullable
         hashed_password=auth.hash_password(payload.password),
         is_verified=False,
-        # The schema validator already rejects accept_terms=False, so
-        # reaching this point means they agreed — timestamp it now rather
-        # than trusting the client's clock.
         accepted_terms_at=datetime.utcnow(),
     )
 
-    # Only generate a verification token if there's actually an email to
-    # verify — most new accounts won't have one yet, and that's fine.
     if payload.email:
         verification_token, verification_expires = auth.generate_verification_token()
         user.verification_token = verification_token
         user.verification_expires = verification_expires
 
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    except IntegrityError:
+        db.rollback()
+        logger.exception("Registration failed for username=%s", payload.username)
+        raise HTTPException(status_code=400, detail="Could not create account")
 
-    # Seed default folders so the archive isn't empty on first login.
-    for name, color in DEFAULT_FOLDERS:
-        db.add(models.Folder(name=name, color=color, owner_id=user.id))
-    db.commit()
+    # Seed default folders. If this fails, keep the account — a missing
+    # folder set is recoverable; a half-created user is worse.
+    try:
+        for name, color in DEFAULT_FOLDERS:
+            db.add(models.Folder(name=name, color=color, owner_id=user.id))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to seed default folders for user %s", user.id)
 
     if payload.email:
         auth.send_verification_email(user.email, user.verification_token)
 
     token = auth.create_access_token({"sub": user.id})
     return schemas.Token(access_token=token, user=user)
-
 
 @app.get("/auth/verify")
 def verify_email(token: str, db: Session = Depends(get_db)):
