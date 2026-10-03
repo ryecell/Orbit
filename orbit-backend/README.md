@@ -43,11 +43,24 @@ alembic upgrade head
 ```
 
 SQLite is fine for local dev but gets wiped on every deploy/restart on most
-hosting platforms, so production needs real Postgres. `alembic upgrade head`
-creates the schema; run it once before the app's first start, and again
-after pulling any future migration. The `Procfile`'s `release` step does
-this automatically on platforms that support release phases (Render,
-Heroku-style).
+hosting platforms, so production needs real Postgres.
+
+**How migrations actually run in production:** the `Dockerfile`'s `CMD`
+runs `alembic upgrade head` right before starting the server, so every
+deploy applies any pending migrations automatically. This is deliberate —
+on Render, Docker-type services run the Dockerfile `CMD` directly and
+ignore the `Procfile` entirely, so the `Procfile`'s `release:` line never
+executes there. (If the migration command fails, the container exits and
+Render keeps serving the previous version — check the deploy logs.)
+
+**Important — `Base.metadata.create_all()` in `main.py` is NOT a
+substitute for migrations.** It only creates tables that don't exist yet;
+it never adds a column to a table that already exists. A database built
+that way silently drifts from the models, and the first request that
+touches the missing column crashes. If you ever point alembic at a
+database that was built by `create_all()`, run `alembic stamp <revision>`
+(or insert the matching row into the `alembic_version` table) first so
+alembic doesn't try to re-create tables that are already there.
 
 To add a new migration after changing `models.py`:
 ```bash
@@ -92,11 +105,13 @@ export SENTRY_DSN="https://...@sentry.io/..."
 
 **5. Deploying**
 
-- `Dockerfile` — builds a container that runs `uvicorn` with `--proxy-headers`
-  (so it trusts `X-Forwarded-*` from your platform's load balancer/TLS
-  termination).
-- `Procfile` — for Render/Heroku-style platforms; runs migrations as a
-  release step, then starts the web process.
+- `Dockerfile` — builds a container whose `CMD` runs `alembic upgrade head`
+  and then `uvicorn` with `--proxy-headers` (so it trusts `X-Forwarded-*`
+  from your platform's load balancer/TLS termination). This is what Render
+  actually executes for a Docker-type service.
+- `Procfile` — **not used** by a Docker-type Render service (Render ignores
+  it there). Kept only for Heroku-style platforms or a native, non-Docker
+  Render service.
 - `.github/workflows/ci.yml` — installs dependencies and import-checks the
   app on every push/PR.
 

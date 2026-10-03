@@ -51,14 +51,16 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """
-    Without this, an unhandled exception falls through to Starlette's
-    default ServerErrorMiddleware, which sits OUTSIDE CORSMiddleware in the
-    stack — so its response never gets CORS headers added. The browser then
-    reports it as a CORS failure ("No Access-Control-Allow-Origin header"),
-    which is misleading: the real problem is a server crash, not CORS. This
-    handler runs INSIDE the CORS layer instead, so error responses get
-    proper CORS headers, a clean JSON body instead of a raw traceback, and
-    get logged / sent to Sentry if configured.
+    Catch-all for unexpected crashes: logs the traceback (and reports to
+    Sentry if configured) and returns a clean JSON 500 instead of a raw
+    traceback.
+
+    NOTE: Starlette runs this from its outermost error layer, which is
+    outside any middleware added with add_middleware() — so on its own this
+    does NOT give the response CORS headers. That's handled by wrapping the
+    whole app in CORSMiddleware at the bottom of this file. Both pieces are
+    needed: this makes the body clean, the wrapper makes it readable by the
+    browser.
     """
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     if SENTRY_DSN:
@@ -87,13 +89,8 @@ else:
 # env var actually took effect, has a typo, or has hidden whitespace.
 print(f"[orbit] CORS allowed origins (parsed): {allowed_origins!r}")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS is applied by wrapping the whole app at the very bottom of this file,
+# not via app.add_middleware() — see the comment there for why.
 
 
 @app.middleware("http")
@@ -790,3 +787,24 @@ async def analyze_image(request: Request, payload: schemas.AnalyzeRequest, user:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ============================== CORS (must stay LAST) ==============================
+# Wrap the entire app instead of using app.add_middleware(CORSMiddleware, ...).
+# Starlette's catch-all error layer (ServerErrorMiddleware) sits OUTSIDE any
+# middleware added the normal way, so when a request crashes with an unhandled
+# exception, the 500 response skips CORSMiddleware and goes out with no CORS
+# headers. The browser then hides the real error and reports a generic
+# "Failed to fetch" / CORS failure — which cost us a long debugging session
+# once already. Wrapping the whole app makes CORS the outermost layer, so
+# every response, including crash responses, carries the headers and the
+# frontend can read the actual error. (This is the fix Starlette's docs
+# recommend.) uvicorn imports `main:app`, so reassigning `app` here is what
+# actually gets served.
+app = CORSMiddleware(
+    app=app,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
