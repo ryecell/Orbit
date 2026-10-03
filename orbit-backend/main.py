@@ -11,6 +11,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 import auth
 import models
@@ -18,8 +19,7 @@ import schemas
 from database import Base, SessionLocal, engine, get_db
 from logging_config import logger
 
-# --- Error monitoring (optional) ----------------------------------------------
-# Only activates if SENTRY_DSN is set, so this is a no-op in local dev.
+
 SENTRY_DSN = os.environ.get("SENTRY_DSN")
 if SENTRY_DSN:
     import sentry_sdk
@@ -146,7 +146,7 @@ def register(request: Request, payload: schemas.UserCreate, db: Session = Depend
         db.refresh(user)
     except IntegrityError:
         db.rollback()
-        logger.exception("Registration failed for username=%s", payload.username)
+        logger.exception("Registration conflict for username=%s", payload.username)
         raise HTTPException(status_code=400, detail="Could not create account")
 
     # Seed default folders. If this fails, keep the account — a missing
