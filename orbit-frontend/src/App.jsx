@@ -200,12 +200,12 @@ function QuickAction({ icon: Icon, label, onClick }) {
 const LEGAL_CONTENT = {
   terms: {
     title: "Terms of Service",
-    body: `Last updated: [DATE]
+    body: `Last updated: October 4, 2026
 
 By creating an account or using Orbit, you agree to these Terms.
 
 # Eligibility
-You must be at least 13 years old (or 16 in the EEA/UK, where required) to use Orbit.
+You must be at least 13 years old to use Orbit. If you are in the European Economic Area (EEA) or the United Kingdom, you must be at least 16. Orbit is not directed at children below these ages, and signup requires confirming you meet the minimum age.
 
 # Your account
 You're responsible for keeping your password secure and for activity under your account. An email address is optional at signup — without one, account recovery (e.g. a forgotten password) may not be possible.
@@ -225,7 +225,7 @@ Other members of a group you join can see messages you post there. We're not res
 We aim to keep Orbit reliable, but don't guarantee uninterrupted access. Features marked "coming soon" aren't available yet and may change.
 
 # Termination
-You can stop using Orbit anytime. We may suspend accounts that violate these Terms. You can request account deletion at any time.
+You can stop using Orbit anytime, and you can delete your account from within the app at any time (Profile → Delete account). We may suspend accounts that violate these Terms.
 
 # Disclaimers
 The Service is provided "as is," without warranties of any kind, including that AI suggestions will be accurate.
@@ -234,24 +234,24 @@ The Service is provided "as is," without warranties of any kind, including that 
 To the maximum extent permitted by law, we are not liable for indirect, incidental, or consequential damages arising from your use of the Service.
 
 # Governing law
-These Terms are governed by the laws of [YOUR COUNTRY/STATE].
+These Terms are governed by the laws of the Republic of the Philippines. Any dispute arising from these Terms or your use of Orbit is subject to the exclusive jurisdiction of the courts of the Republic of the Philippines.
 
 # Changes
 We may update these Terms; continued use after changes means you accept them.
 
 # Contact
-Questions? Reach us at [YOUR CONTACT EMAIL].
+Questions? Reach us at ryecellz23@gmail.com.
 
 This is a summary for in-app display. The full Terms of Service document governs.`,
   },
   privacy: {
     title: "Privacy Policy",
-    body: `Last updated: [DATE]
+    body: `Last updated: October 4, 2026
 
-This explains what Orbit collects and how we use it.
+This explains what Orbit collects and how we use it. The data controller for Orbit is the operator of this service, contactable at ryecellz23@gmail.com.
 
 # What we collect
-Account info: username (required), password (hashed, never stored in plain text), full name and email (both optional).
+Account info: username (required), password (hashed, never stored in plain text), and full name and email (both optional). Your date of birth is checked at signup only to verify you meet the minimum age, and is not stored.
 
 Your content: folders, archive items (including photos you upload), tasks, reminders, calendar events, study session logs, and group messages.
 
@@ -263,25 +263,36 @@ We don't use advertising cookies or third-party tracking scripts.
 To provide the Service, process photos you upload for AI tagging, send account emails (verification, password reset) if you've linked an email, and prevent abuse.
 
 # AI processing
-Photos you upload through the capture feature are sent to Anthropic (Claude's maker) for analysis. Only images you actively upload are sent — nothing happens automatically in the background.
+Photos you upload through the capture feature are sent to Anthropic (Claude's maker) for analysis. Only images you actively upload are sent — nothing happens automatically in the background. We use Anthropic's Commercial Terms, which do not permit training on your data; Anthropic's own privacy terms govern their handling of the images.
 
-# Other services we use
-Hosting and database providers to run Orbit, and an email provider for account emails, if configured. We don't sell your data or share it for others' marketing.
+# Subprocessors
+We use the following third-party services to operate Orbit:
+
+- Neon — PostgreSQL database hosting (all account and content data)
+- Render — application hosting (all data processed by the API)
+- Vercel — frontend static hosting (no user data)
+- Anthropic — AI image analysis (images you actively upload)
+- Resend — transactional email, if configured (your email address and the content of verification/reset emails)
+
+# Data retention
+Your account and content are retained while your account is active. When you delete your account, we immediately revoke all sessions and anonymize your identifiers (username, email, name), then hard-delete the underlying record after a 30-day grace period, after which no personal data remains. Group messages you've posted remain visible to other group members, attributed to your display name — they are part of the group's shared history and are not removed by account deletion.
 
 # Security
 Passwords are hashed (bcrypt), sessions use signed tokens with expiration, and we rate-limit sensitive endpoints. No method is 100% secure.
 
 # Your rights
-Depending on where you live, you may have rights to access, correct, delete, or export your data. Contact us at [YOUR CONTACT EMAIL] to exercise these.
+Under the Philippine Data Privacy Act of 2012 (RA 10173) and, where applicable, the GDPR, you have the right to be informed about how your data is processed, to access your personal data, to correct inaccurate data, to erase or block your data, to object to processing, to data portability, and to file a complaint.
+
+You can exercise access and portability yourself via Profile → Export my data, and erasure via Profile → Delete account. For anything else, contact us at ryecellz23@gmail.com. You may also file a complaint with the National Privacy Commission (privacy.gov.ph) or your local supervisory authority.
 
 # Children's privacy
-Orbit isn't directed at children under 13 (or 16 in the EEA/UK). Contact us if you believe a child has created an account.
+Orbit isn't directed at children under 13 (or 16 in the EEA/UK). Signup requires confirming you meet the minimum age. Contact us if you believe a child has created an account.
 
 # Changes
 We'll update the date above if this policy changes materially.
 
 # Contact
-[YOUR CONTACT EMAIL]
+ryecellz23@gmail.com
 
 This is a summary for in-app display. The full Privacy Policy document governs.`,
   },
