@@ -243,6 +243,7 @@ class MessageCreate(BaseModel):
 
 class MessageOut(BaseModel):
     id: str
+    sender_id: Optional[str] = None  # NULL for old messages / deleted senders
     sender_name: str
     text: str
     created_at: datetime

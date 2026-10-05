@@ -43,6 +43,21 @@ const STARFIELD_BG = {
   backgroundSize: "200px 200px",
 };
 
+// True on desktop-width windows. Drives layouts that need different structure
+// (not just different CSS), like the two-pane Groups workspace.
+function useIsDesktop(breakpoint = 860) {
+  const query = `(min-width: ${breakpoint}px)`;
+  const [matches, setMatches] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = (e) => setMatches(e.matches);
+    setMatches(mql.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
+}
+
 function OrbitCatLogo({ size = 28, glow = true }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" style={glow ? { filter: "drop-shadow(0 0 10px rgba(80,200,120,0.45))" } : undefined}>
@@ -672,7 +687,8 @@ function HomeScreen({ folders, tasks, go, user }) {
         </div>
       </div>
 
-      <div style={screenBox}>
+      <div className="orbit-cols" style={screenBox}>
+       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Recent folders</div>
           <span onClick={() => go("archive")} style={{ fontSize: 12.5, fontWeight: 700, color: T.primary, cursor: "pointer" }}>See all</span>
@@ -692,7 +708,9 @@ function HomeScreen({ folders, tasks, go, user }) {
           );
         })}
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+       </div>
+       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="orbit-tasks-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Tasks</div>
           <span onClick={() => go("todo")} style={{ fontSize: 12.5, fontWeight: 700, color: T.primary, cursor: "pointer" }}>See all</span>
         </div>
@@ -704,6 +722,7 @@ function HomeScreen({ folders, tasks, go, user }) {
             <PriorityTag p={t.priority} />
           </div>
         ))}
+       </div>
       </div>
     </div>
   );
@@ -713,7 +732,7 @@ function ArchiveScreen({ folders, go }) {
   return (
     <div>
       <TopBar title="My Archive" />
-      <div style={screenBox}>
+      <div className="orbit-grid" style={screenBox}>
         {FOLDER_NAMES.map((name) => {
           const folder = folders[name];
           if (!folder) return null;
@@ -748,6 +767,7 @@ function FolderDetailScreen({ name, folder, go, back, onDeleteItem }) {
           <div style={{ fontSize: 13, color: T.inkSoft }}>{items.length} items in this folder</div>
         </div>
         {items.length === 0 && <div style={{ textAlign: "center", padding: "40px 10px", color: T.inkFaint, fontSize: 13.5 }}>Nothing here yet. Capture a photo or note to add your first item.</div>}
+        <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {items.map((it) => (
           <div key={it.id} style={{ ...rowCardStyle, alignItems: "flex-start", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
@@ -760,6 +780,7 @@ function FolderDetailScreen({ name, folder, go, back, onDeleteItem }) {
             </div>
           </div>
         ))}
+        </div>
         <button onClick={() => go("capture")} style={{ ...primaryBtn, marginTop: 6 }}><Plus size={16} /> Add to {name}</button>
       </div>
     </div>
@@ -962,7 +983,7 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
         <button onClick={() => shiftMonth(-1)} style={iconBtnStyle}><ChevronLeft size={16} color={T.ink} /></button>
         <button onClick={() => shiftMonth(1)} style={iconBtnStyle}><ChevronRight size={16} color={T.ink} /></button>
       </>} />
-      <div style={screenBox}>
+      <div className="orbit-split" style={screenBox}>
         <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 16, padding: 14 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 }}>
             {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, color: T.inkFaint }}>{d}</div>)}
@@ -982,6 +1003,7 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
           </div>
         </div>
 
+       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>{selected.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</div>
           <span onClick={openForm} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 700, color: T.primary, cursor: "pointer" }}><Plus size={14} /> Add event</span>
@@ -1019,6 +1041,7 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
             </div>
           </div>
         )}
+       </div>
       </div>
     </div>
   );
@@ -1044,6 +1067,7 @@ function TodoScreen({ tasks, back, onToggle, onAdd }) {
             <button key={f} onClick={() => setFilter(f)} style={{ border: `1px solid ${filter === f ? T.ink : T.line}`, borderRadius: 999, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", background: filter === f ? T.ink : T.panel, color: filter === f ? "#fff" : T.inkSoft }}>{f}</button>
           ))}
         </div>
+        <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {filtered.map((t) => (
           <div key={t.id} style={rowCardStyle} onClick={() => onToggle(t)}>
             <div style={{ cursor: "pointer" }}>{t.done ? <CheckSquare size={19} color={T.primary} /> : <Square size={19} color={T.inkFaint} />}</div>
@@ -1053,6 +1077,7 @@ function TodoScreen({ tasks, back, onToggle, onAdd }) {
             <PriorityTag p={t.priority} />
           </div>
         ))}
+        </div>
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
           <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTask()} placeholder="Add a task…" style={inputStyle} />
           <button onClick={addTask} style={{ ...primaryBtn, padding: "0 18px" }}><Plus size={16} /></button>
@@ -1062,7 +1087,7 @@ function TodoScreen({ tasks, back, onToggle, onAdd }) {
   );
 }
 
-function GroupsListScreen({ back, groups, go, onCreate, onJoin }) {
+function GroupsListScreen({ back, groups, go, onCreate, onJoin, activeId }) {
   const [mode, setMode] = useState(null); // null | "create" | "join"
   const [input, setInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1090,7 +1115,7 @@ function GroupsListScreen({ back, groups, go, onCreate, onJoin }) {
       <div style={screenBox}>
         {groups.length === 0 && !mode && <div style={{ fontSize: 13, color: T.inkFaint, padding: "10px 0" }}>You're not in any groups yet.</div>}
         {groups.map((g) => (
-          <div key={g.id} onClick={() => go("group", g.id)} style={{ ...rowCardStyle, cursor: "pointer" }}>
+          <div key={g.id} onClick={() => go("group", g.id)} style={{ ...rowCardStyle, cursor: "pointer", ...(g.id === activeId ? { border: `1px solid ${T.primary}`, background: T.primarySoft } : {}) }}>
             <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><Users size={18} /></div>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>{g.name}</div>
@@ -1123,7 +1148,7 @@ function GroupsListScreen({ back, groups, go, onCreate, onJoin }) {
   );
 }
 
-function GroupScreen({ back, user, group }) {
+function GroupScreen({ back, user, group, embedded = false }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [connected, setConnected] = useState(false);
@@ -1164,8 +1189,8 @@ function GroupScreen({ back, user, group }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <TopBar title={group.name} onBack={back} right={<>
+    <div style={{ display: "flex", flexDirection: "column", height: embedded ? "auto" : "100%", flex: embedded ? 1 : undefined, minHeight: 0 }}>
+      <TopBar title={group.name} onBack={embedded ? undefined : back} right={<>
         <span style={{ fontSize: 11, fontWeight: 700, color: connected ? "#0E9F6E" : T.inkFaint, alignSelf: "center", marginRight: 4 }}>{connected ? "● live" : "connecting…"}</span>
         <button onClick={() => setShowCode((s) => !s)} style={iconBtnStyle}><Users size={15} color={T.ink} /></button>
       </>} />
@@ -1177,16 +1202,19 @@ function GroupScreen({ back, user, group }) {
       {authFailed && <div style={{ margin: "0 20px 10px" }}><ErrorBanner message="Your session couldn't be verified for chat. Try signing out and back in." /></div>}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 20px", display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map((m) => {
-          const mine = m.sender_name === (user.name || user.username);
+          // sender_id is the reliable signal; older messages only have a name.
+          const mine = m.sender_id ? m.sender_id === user.id : m.sender_name === (user.name || user.username);
+          const sentAt = m.created_at ? new Date(m.created_at.endsWith("Z") || /[+-]\d\d:\d\d$/.test(m.created_at) ? m.created_at : `${m.created_at}Z`) : null;
           return (
-            <div key={m.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "78%" }}>
+            <div key={m.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: embedded ? "70%" : "78%" }}>
               {!mine && <div style={{ fontSize: 11, fontWeight: 700, color: T.primary, marginBottom: 2 }}>{m.sender_name}</div>}
-              <div style={{ background: mine ? T.primary : T.panel, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: 14, padding: "10px 13px", fontSize: 13.5 }}>{m.text}</div>
+              <div style={{ background: mine ? T.primary : T.panel, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: 14, padding: "10px 13px", fontSize: 13.5, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{m.text}</div>
+              {sentAt && !isNaN(sentAt) && <div style={{ fontSize: 10.5, color: T.inkFaint, marginTop: 3, textAlign: mine ? "right" : "left" }}>{sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</div>}
             </div>
           );
         })}
       </div>
-      <div style={{ display: "flex", gap: 8, padding: "12px 20px 90px", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, padding: embedded ? "12px 20px 16px" : "12px 20px 90px", alignItems: "center" }}>
         <Paperclip size={17} color={T.inkFaint} />
         <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Type a message…" style={inputStyle} />
         <button onClick={send} style={{ ...iconBtnStyle, background: T.primary, border: "none" }}><Send size={15} color="#fff" /></button>
@@ -1303,6 +1331,7 @@ function RemindersScreen({ back, reminders, onAdd }) {
       <TopBar title="Reminders" onBack={back} />
       <div style={screenBox}>
         {reminders.length === 0 && <div style={{ fontSize: 13, color: T.inkFaint }}>No reminders yet.</div>}
+        <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {reminders.map((r) => {
           const Icon = kindIcon[r.kind] || Bell;
           return (
@@ -1315,6 +1344,7 @@ function RemindersScreen({ back, reminders, onAdd }) {
             </div>
           );
         })}
+        </div>
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
           <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addReminder()} placeholder="New reminder…" style={inputStyle} />
           <button onClick={addReminder} style={{ ...primaryBtn, padding: "0 18px" }}><Plus size={16} /></button>
@@ -1527,6 +1557,29 @@ const MOBILE_NAV = [
   { key: "profile", icon: User, label: "Profile" },
 ];
 
+// Desktop-only: group list on the left, the open chat filling the rest.
+function GroupsWorkspace({ groups, activeGroup, user, go, onCreate, onJoin }) {
+  const current = activeGroup || groups[0] || null;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 360px) 1fr", gap: 20, height: "100vh", boxSizing: "border-box", padding: "12px 0 20px" }}>
+      <div style={{ overflowY: "auto", minHeight: 0 }}>
+        <GroupsListScreen groups={groups} go={go} onCreate={onCreate} onJoin={onJoin} activeId={current ? current.id : null} />
+      </div>
+      <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 18, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+        {current ? (
+          <GroupScreen key={current.id} embedded user={user} group={current} />
+        ) : (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: T.inkFaint, textAlign: "center", padding: 24 }}>
+            <Users size={34} color={T.inkFaint} />
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.inkSoft }}>No group selected</div>
+            <div style={{ fontSize: 13 }}>Create a group or join one with an invite code to start chatting.</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MainShell({ user, onLogout, onUserUpdate }) {
   const [screen, setScreen] = useState("home");
   const [activeFolder, setActiveFolder] = useState(null);
@@ -1539,6 +1592,7 @@ function MainShell({ user, onLogout, onUserUpdate }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const isDesktop = useIsDesktop();
 
   useEffect(() => {
     let cancelled = false;
@@ -1645,10 +1699,15 @@ function MainShell({ user, onLogout, onUserUpdate }) {
       case "capture": return <CaptureScreen back={() => setScreen("home")} onSave={saveItem} folders={folders} />;
       case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} />;
       case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} />;
-      case "groupslist": return <GroupsListScreen groups={groups} go={go} onCreate={createGroup} onJoin={joinGroup} />;
-      case "group": return activeGroup
-        ? <GroupScreen back={() => setScreen("groupslist")} user={user} group={activeGroup} />
-        : <CenterSpinner label="Loading group…" />;
+      case "groupslist":
+        return isDesktop
+          ? <GroupsWorkspace groups={groups} activeGroup={activeGroup} user={user} go={go} onCreate={createGroup} onJoin={joinGroup} />
+          : <GroupsListScreen groups={groups} go={go} onCreate={createGroup} onJoin={joinGroup} />;
+      case "group":
+        if (isDesktop) return <GroupsWorkspace groups={groups} activeGroup={activeGroup} user={user} go={go} onCreate={createGroup} onJoin={joinGroup} />;
+        return activeGroup
+          ? <GroupScreen back={() => setScreen("groupslist")} user={user} group={activeGroup} />
+          : <CenterSpinner label="Loading group…" />;
       case "insights": return <InsightsScreen back={() => setScreen("home")} tasks={tasks} studySessions={studySessions} onLogSession={logStudySession} />;
       case "reminders": return <RemindersScreen back={() => setScreen("home")} reminders={reminders} onAdd={addReminder} />;
       case "profile": return <ProfileScreen back={() => setScreen("home")} user={user} onLogout={onLogout} onUserUpdate={onUserUpdate} />;
@@ -1671,9 +1730,9 @@ function MainShell({ user, onLogout, onUserUpdate }) {
         <div onClick={() => go("capture")} style={{ ...primaryBtn, marginTop: 18, width: "100%", boxSizing: "border-box" }}><Camera size={15} /> New capture</div>
       </div>
 
-      <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
+      <div className="orbit-main" style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "center" }}>
         <div className="orbit-frame" style={{ width: "100%", maxWidth: 420, background: T.bg, position: "relative", minHeight: "640px" }}>
-          <div key={screen} style={{ animation: "fadeIn 0.32s ease" }}>{renderScreen()}</div>
+          <div key={screen} className={["archive", "folder", "home", "todo", "reminders", "calendar", "groupslist", "group", "capture"].includes(screen) ? "orbit-page" : "orbit-page orbit-narrow"} style={{ animation: "fadeIn 0.32s ease" }}>{renderScreen()}</div>
           <div className="orbit-bottomnav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 420, margin: "0 auto", background: T.panel, borderTop: `1px solid ${T.line}`, padding: "10px 22px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             {MOBILE_NAV.map((n) => n.key === "capture" ? (
               <div key={n.key} onClick={() => go(n.key)} style={{ width: 46, height: 46, borderRadius: 999, background: `linear-gradient(135deg, #6FDA9C, ${T.primary})`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: `0 6px 18px ${T.primaryGlow}` }}>
@@ -1691,9 +1750,19 @@ function MainShell({ user, onLogout, onUserUpdate }) {
 
       <style>{`
         @media (min-width: 860px) {
-          .orbit-sidebar { display: block !important; }
+          .orbit-sidebar { display: block !important; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow-y: auto; width: 240px !important; }
           .orbit-bottomnav { display: none !important; }
-          .orbit-frame { max-width: 480px !important; border-left: 1px solid ${T.line}; border-right: 1px solid ${T.line}; }
+          .orbit-main { justify-content: flex-start !important; }
+          .orbit-frame { max-width: none !important; }
+          .orbit-page { max-width: 1280px; margin: 0 auto; padding: 0 12px; box-sizing: border-box; }
+          .orbit-narrow { max-width: 760px; }
+          /* lists become card grids instead of one long stretched column */
+          .orbit-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px !important; align-items: start; }
+          .orbit-cols { display: grid !important; grid-template-columns: 1fr 1fr; gap: 28px !important; align-items: start; }
+          .orbit-split { display: grid !important; grid-template-columns: minmax(340px, 520px) 1fr; gap: 28px !important; align-items: start; }
+        }
+        @media (min-width: 1500px) {
+          .orbit-page { max-width: 1440px; }
         }
       `}</style>
     </div>

@@ -693,6 +693,7 @@ async def group_chat_ws(websocket: WebSocket, group_id: str, token: Optional[str
                 group_id,
                 {
                     "id": msg.id,
+                    "sender_id": msg.sender_id,
                     "sender_name": msg.sender_name,
                     "text": msg.text,
                     "created_at": msg.created_at.isoformat(),
