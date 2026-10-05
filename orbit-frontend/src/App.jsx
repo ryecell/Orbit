@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, CheckSquare, Square, Clock, MapPin, TrendingUp, Sparkles,
   Send, X, Check, ArrowLeft, Shield, Zap, Star, Atom, Sigma, Wrench, FileText,
   Wifi, Mic, ListTodo, BarChart3, ChevronDown, AlertCircle, Loader2,
-  Leaf, Paperclip, Lock, LayoutGrid, Layers, LogOut, Mail, KeyRound
+  Leaf, Paperclip, Lock, LayoutGrid, Layers, LogOut, Mail, KeyRound, Download, Trash2
 } from "lucide-react";
 import { api } from "./api.js";
 
@@ -275,7 +275,7 @@ We use the following third-party services to operate Orbit:
 - Resend — transactional email, if configured (your email address and the content of verification/reset emails)
 
 # Data retention
-Your account and content are retained while your account is active. When you delete your account, we immediately revoke all sessions and anonymize your identifiers (username, email, name), then hard-delete the underlying record after a 30-day grace period, after which no personal data remains. Group messages you've posted remain visible to other group members, attributed to your display name — they are part of the group's shared history and are not removed by account deletion.
+Your account and content are retained while your account is active. When you delete your account, we immediately revoke all sessions, erase your content (folders, notes, tasks, reminders, events, study history) and anonymize your identifiers (username, email, name), then hard-delete the underlying record after a 30-day grace period, after which no personal data remains. Group messages you've posted remain visible to other group members, attributed to your display name — they are part of the group's shared history and are not removed by account deletion.
 
 # Security
 Passwords are hashed (bcrypt), sessions use signed tokens with expiration, and we rate-limit sensitive endpoints. No method is 100% secure.
@@ -1324,11 +1324,75 @@ function RemindersScreen({ back, reminders, onAdd }) {
   );
 }
 
+// Authenticated request for the account endpoints (export / delete). Kept
+// here so api.js doesn't need changes; errors come back as readable messages.
+async function accountRequest(path, options = {}) {
+  const res = await fetch(`${String(api.base).replace(/\/$/, "")}${path}`, {
+    ...options,
+    headers: { Authorization: `Bearer ${api.getToken()}`, ...(options.headers || {}) },
+  });
+  if (!res.ok) {
+    let msg = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body && typeof body.detail === "string") msg = body.detail;
+    } catch { /* non-JSON error body */ }
+    if (res.status === 429) msg = "Too many attempts — please wait a bit and try again.";
+    throw new Error(msg);
+  }
+  return res;
+}
+
 function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
   const [emailInput, setEmailInput] = useState("");
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState("");
   const [legalModal, setLegalModal] = useState(null); // null | "terms" | "privacy"
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [showDelete, setShowDelete] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  async function exportData() {
+    setExporting(true);
+    setExportError("");
+    try {
+      const res = await accountRequest("/me/export");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `orbit-export-${user.username}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err.message || "Couldn't export your data.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function deleteAccount(e) {
+    e.preventDefault();
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await accountRequest("/me/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: deletePassword }),
+      });
+      api.clearToken();
+      window.location.reload();
+    } catch (err) {
+      setDeleteError(err.message || "Couldn't delete your account.");
+      setDeleting(false);
+    }
+  }
 
   async function linkEmail(e) {
     e.preventDefault();
@@ -1401,6 +1465,38 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
           <Lock size={17} color={T.inkSoft} />
           <div style={{ fontSize: 13.5, color: T.ink }}>Privacy Policy</div>
         </div>
+
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 10 }}>Your data</div>
+        <div onClick={exporting ? undefined : exportData} style={{ ...rowCardStyle, cursor: exporting ? "default" : "pointer", opacity: exporting ? 0.6 : 1 }}>
+          {exporting ? <Loader2 size={17} color={T.inkSoft} style={{ animation: "spin 1s linear infinite" }} /> : <Download size={17} color={T.inkSoft} />}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13.5, color: T.ink }}>Export my data</div>
+            <div style={{ fontSize: 11.5, color: T.inkFaint }}>Download everything in your account as a JSON file</div>
+          </div>
+        </div>
+        {exportError && <ErrorBanner message={exportError} />}
+
+        {!showDelete ? (
+          <div onClick={() => setShowDelete(true)} style={{ ...rowCardStyle, cursor: "pointer" }}>
+            <Trash2 size={17} color={T.danger} />
+            <div style={{ fontSize: 13.5, color: T.danger, fontWeight: 700 }}>Delete account</div>
+          </div>
+        ) : (
+          <form onSubmit={deleteAccount} style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10, border: `1px solid ${T.danger}` }}>
+            <FieldLabel icon={Trash2}>Delete your account</FieldLabel>
+            <div style={{ fontSize: 12, color: T.inkSoft, lineHeight: 1.5 }}>
+              This permanently deletes your folders, notes, tasks, reminders, events and study history, and signs you out everywhere. It can't be undone. Messages you've posted in groups stay visible to other members under your display name. Consider exporting your data first.
+            </div>
+            <input type="password" autoComplete="current-password" value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} placeholder="Enter your password to confirm" style={inputStyle} />
+            {deleteError && <ErrorBanner message={deleteError} />}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" disabled={deleting} onClick={() => { setShowDelete(false); setDeletePassword(""); setDeleteError(""); }} style={{ ...secondaryBtn, flex: 1 }}>Cancel</button>
+              <button type="submit" disabled={deleting || !deletePassword} style={{ ...secondaryBtn, flex: 1, background: T.danger, color: "#fff", border: "none", opacity: deleting || !deletePassword ? 0.6 : 1 }}>
+                {deleting ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : "Delete forever"}
+              </button>
+            </div>
+          </form>
+        )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 10 }}>
           <Zap size={14} color={T.primary} /> Premium — coming soon

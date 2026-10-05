@@ -47,6 +47,11 @@ class User(Base):
     # the person "secures" their account by resetting the password.
     sessions_invalidated_at = Column(DateTime, nullable=True)
 
+    # Set when the person deletes their account. The row is anonymized and
+    # their content erased immediately; this timestamp starts the 30-day
+    # grace period after which purge_deleted_accounts() hard-deletes the row.
+    deleted_at = Column(DateTime, nullable=True, index=True)
+
     # Account lockout after repeated failed logins
     failed_login_attempts = Column(Integer, default=0)
     locked_until = Column(DateTime, nullable=True)
@@ -127,6 +132,11 @@ class GroupMessage(Base):
     id = Column(String, primary_key=True, default=gen_id)
     group_id = Column(String, ForeignKey("groups.id"), nullable=False, index=True)
     sender_name = Column(String, nullable=False)
+    # Who actually sent it (NULL for messages from before this column existed,
+    # and set back to NULL when the sender deletes their account). Lets the
+    # data export find a person's own messages without matching on display name,
+    # which isn't unique.
+    sender_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     text = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

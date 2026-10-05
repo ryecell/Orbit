@@ -66,6 +66,12 @@ class ResetPasswordRequest(BaseModel):
         return v
 
 
+class DeleteAccountRequest(BaseModel):
+    # Re-entered on purpose: a stolen/left-open session alone shouldn't be able
+    # to erase an account. No strength rules here — it's checked against the hash.
+    password: str
+
+
 class UserOut(BaseModel):
     id: str
     username: str

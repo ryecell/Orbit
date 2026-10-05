@@ -47,17 +47,6 @@ async function request(path, { method = "GET", body, auth = true } = {}) {
     // no JSON body
   }
 
-  // 401 on an *authenticated* request means the token is dead (expired,
-  // revoked by logout elsewhere, or invalidated by a password reset).
-  // Clear it and reload so App re-checks session state and shows login.
-  // Skipped for auth:false requests (login/register/forgot-password),
-  // where a 401 just means "wrong credentials" and the user should stay
-  // on the form to see the error.
-  if (res.status === 401 && auth) {
-    localStorage.removeItem(TOKEN_KEY);
-    window.location.reload();
-    throw new Error("Session expired. Please sign in again.");
-  }
   if (!res.ok) {
     throw new Error(formatApiError(data, res.status));
   }

@@ -107,8 +107,8 @@ def get_current_user(
         raise credentials_exception  # token was revoked (e.g. user logged out)
 
     user = db.query(models.User).filter(models.User.id == user_id).first()
-    if user is None:
-        raise credentials_exception
+    if user is None or user.deleted_at:
+        raise credentials_exception  # unknown, or the account was deleted
 
     if user.sessions_invalidated_at and iat:
         if datetime.utcfromtimestamp(iat) < user.sessions_invalidated_at:

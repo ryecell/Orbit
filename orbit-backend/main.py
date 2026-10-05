@@ -1,10 +1,12 @@
 import json
 import os
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -231,7 +233,7 @@ def login(request: Request, payload: schemas.UserLogin, db: Session = Depends(ge
     # is wrong — distinguishing the two lets an attacker enumerate accounts.
     generic_error = HTTPException(status_code=401, detail="Incorrect username or password")
 
-    if not user:
+    if not user or user.deleted_at:
         raise generic_error
 
     if auth.is_locked(user):
@@ -246,6 +248,7 @@ def login(request: Request, payload: schemas.UserLogin, db: Session = Depends(ge
         raise generic_error
 
     auth.register_successful_login(user, db)
+    _maybe_purge()
     token = auth.create_access_token({"sub": user.id})
     return schemas.Token(access_token=token, user=user)
 
@@ -614,7 +617,7 @@ def post_message(group_id: str, payload: schemas.MessageCreate, db: Session = De
     _require_membership(group_id, user.id, db)
     # sender_name comes from the authenticated user, never from the request body —
     # trusting a client-supplied name would let anyone post as anyone else.
-    msg = models.GroupMessage(group_id=group_id, sender_name=user.name, text=payload.text[:2000])
+    msg = models.GroupMessage(group_id=group_id, sender_id=user.id, sender_name=user.name, text=payload.text[:2000])
     db.add(msg)
     db.commit()
     db.refresh(msg)
@@ -679,6 +682,7 @@ async def group_chat_ws(websocket: WebSocket, group_id: str, token: Optional[str
                 continue
             msg = models.GroupMessage(
                 group_id=group_id,
+                sender_id=user.id,
                 sender_name=user.name,
                 text=text[:2000],
             )
@@ -698,6 +702,210 @@ async def group_chat_ws(websocket: WebSocket, group_id: str, token: Optional[str
         manager.disconnect(group_id, websocket)
     finally:
         db.close()
+
+
+# ============================== ACCOUNT DELETION & DATA EXPORT ==============================
+
+ACCOUNT_GRACE_DAYS = 30
+
+
+def _erase_user_data(db: Session, user: models.User) -> None:
+    """
+    Removes everything the person created and anonymizes the account row.
+    Does NOT commit — the caller does, so it's all-or-nothing.
+
+    Group messages are deliberately kept (the Privacy Policy says they stay
+    visible under the display name they were posted with); we only detach
+    them from the account by clearing sender_id.
+    """
+    # Groups this person created: hand ownership to the longest-standing other
+    # member so the group keeps working; if nobody else is in it, remove it.
+    for group in db.query(models.Group).filter(models.Group.created_by == user.id).all():
+        successor = (
+            db.query(models.GroupMembership)
+            .filter(models.GroupMembership.group_id == group.id, models.GroupMembership.user_id != user.id)
+            .order_by(models.GroupMembership.joined_at.asc())
+            .first()
+        )
+        if successor:
+            group.created_by = successor.user_id
+        else:
+            db.query(models.GroupMessage).filter(models.GroupMessage.group_id == group.id).delete(synchronize_session=False)
+            db.query(models.GroupMembership).filter(models.GroupMembership.group_id == group.id).delete(synchronize_session=False)
+            db.delete(group)
+
+    db.query(models.GroupMembership).filter(models.GroupMembership.user_id == user.id).delete(synchronize_session=False)
+    db.query(models.GroupMessage).filter(models.GroupMessage.sender_id == user.id).update(
+        {"sender_id": None}, synchronize_session=False
+    )
+
+    folder_ids = [r[0] for r in db.query(models.Folder.id).filter(models.Folder.owner_id == user.id).all()]
+    if folder_ids:
+        db.query(models.Item).filter(models.Item.folder_id.in_(folder_ids)).delete(synchronize_session=False)
+    for model in (models.Folder, models.Task, models.Reminder, models.Event, models.StudySession):
+        db.query(model).filter(model.owner_id == user.id).delete(synchronize_session=False)
+
+    now = datetime.utcnow()
+    user.username = f"deleted-{user.id[:8]}"
+    user.name = "Deleted user"
+    user.email = None
+    user.hashed_password = "!"  # not a valid hash — can never match a password
+    user.is_verified = False
+    user.verification_token = None
+    user.verification_expires = None
+    user.reset_token = None
+    user.reset_expires = None
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    user.sessions_invalidated_at = now  # kills every token issued before this moment
+    user.deleted_at = now
+
+
+@app.post("/me/delete", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("3/minute")
+def delete_account(
+    request: Request,
+    payload: schemas.DeleteAccountRequest,
+    token: str = Depends(auth.oauth2_scheme),
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Deletes the signed-in account. Requires the password again. Failed
+    attempts count toward the normal login lockout, so a stolen token can't be
+    used to brute-force the password here.
+    (POST rather than DELETE-with-a-body: some proxies drop DELETE bodies.)
+    """
+    if auth.is_locked(user):
+        raise HTTPException(status_code=423, detail="Too many failed attempts. Try again later.")
+    if not auth.verify_password(payload.password, user.hashed_password):
+        auth.register_failed_login(user, db)
+        # 403, not 401 — the frontend treats 401 as "session expired" and logs out.
+        raise HTTPException(status_code=403, detail="Incorrect password")
+
+    user_id = user.id
+    _erase_user_data(db, user)
+    db.commit()
+
+    try:
+        auth.revoke_token(token, db)
+    except Exception:
+        # Non-fatal: sessions_invalidated_at already invalidates this token.
+        logger.exception("Could not revoke token after account deletion")
+    logger.info("Account deleted (hard delete in %d days): %s", ACCOUNT_GRACE_DAYS, user_id)
+
+
+@app.get("/me/export")
+@limiter.limit("5/hour")
+def export_my_data(request: Request, user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """A machine-readable (JSON) copy of everything tied to this account."""
+    folders = db.query(models.Folder).filter(models.Folder.owner_id == user.id).all()
+    tasks = db.query(models.Task).filter(models.Task.owner_id == user.id).all()
+    reminders = db.query(models.Reminder).filter(models.Reminder.owner_id == user.id).all()
+    events = db.query(models.Event).filter(models.Event.owner_id == user.id).order_by(models.Event.start_time.asc()).all()
+    sessions = db.query(models.StudySession).filter(models.StudySession.owner_id == user.id).order_by(models.StudySession.started_at.asc()).all()
+
+    memberships = db.query(models.GroupMembership).filter(models.GroupMembership.user_id == user.id).all()
+    group_names = {m.group_id: m.group.name for m in memberships}
+    messages = (
+        db.query(models.GroupMessage)
+        .filter(models.GroupMessage.sender_id == user.id)
+        .order_by(models.GroupMessage.created_at.asc())
+        .all()
+    )
+
+    data = {
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "format_version": 1,
+        "account": {
+            "username": user.username,
+            "name": user.name,
+            "email": user.email,
+            "email_verified": user.is_verified,
+            "created_at": user.created_at,
+            "accepted_terms_at": user.accepted_terms_at,
+        },
+        "folders": [
+            {
+                "name": f.name,
+                "color": f.color,
+                "items": [
+                    {
+                        "title": i.title,
+                        "summary": i.summary,
+                        "tags": [tag for tag in (i.tags or "").split(",") if tag],
+                        "created_at": i.created_at,
+                    }
+                    for i in f.items
+                ],
+            }
+            for f in folders
+        ],
+        "tasks": [{"text": t.text, "priority": t.priority, "done": t.done, "due_date": t.due_date} for t in tasks],
+        "reminders": [{"title": r.title, "detail": r.detail, "kind": r.kind} for r in reminders],
+        "events": [
+            {"title": e.title, "description": e.description, "start_time": e.start_time, "end_time": e.end_time, "color": e.color}
+            for e in events
+        ],
+        "study_sessions": [{"started_at": s.started_at, "minutes": s.minutes, "note": s.note} for s in sessions],
+        "groups": [{"name": m.group.name, "joined_at": m.joined_at} for m in memberships],
+        "group_messages_sent": [
+            {"group": group_names.get(m.group_id, "(group you have left)"), "text": m.text, "sent_at": m.created_at}
+            for m in messages
+        ],
+        "notes": [
+            "Archive items contain the title, summary and tags only; uploaded photos are not stored by Orbit.",
+            "Group messages sent before Orbit began recording message authorship cannot be reliably attributed and are not included.",
+        ],
+    }
+
+    return JSONResponse(
+        content=jsonable_encoder(data),
+        headers={
+            "Content-Disposition": f'attachment; filename="orbit-export-{user.username}.json"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def purge_deleted_accounts() -> None:
+    """Hard-deletes accounts whose 30-day grace period is over, and old revoked-token rows."""
+    db = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=ACCOUNT_GRACE_DAYS)
+        expired = db.query(models.User).filter(models.User.deleted_at.isnot(None), models.User.deleted_at < cutoff).all()
+        for u in expired:
+            db.delete(u)
+        db.query(models.RevokedToken).filter(models.RevokedToken.expires_at < datetime.utcnow()).delete(synchronize_session=False)
+        db.commit()
+        if expired:
+            logger.info("Purged %d deleted account(s) past the grace period", len(expired))
+    except Exception:
+        db.rollback()
+        logger.exception("purge_deleted_accounts failed")
+    finally:
+        db.close()
+
+
+# Render's free tier sleeps, so there's no reliable background scheduler.
+# Instead: purge on every startup, and at most once per 6 hours on login.
+_last_purge = 0.0
+
+
+def _maybe_purge() -> None:
+    global _last_purge
+    now = time.time()
+    if now - _last_purge < 6 * 3600:
+        return
+    _last_purge = now
+    purge_deleted_accounts()
+
+
+@app.on_event("startup")
+def _purge_on_startup() -> None:
+    global _last_purge
+    _last_purge = time.time()
+    purge_deleted_accounts()
 
 
 # ============================== AI AUTO-TAGGING ==============================
