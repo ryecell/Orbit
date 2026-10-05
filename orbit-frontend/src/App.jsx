@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, CheckSquare, Square, Clock, MapPin, TrendingUp, Sparkles,
   Send, X, Check, ArrowLeft, Shield, Zap, Star, Atom, Sigma, Wrench, FileText,
   Wifi, Mic, ListTodo, BarChart3, ChevronDown, AlertCircle, Loader2,
-  Leaf, Paperclip, Lock, LayoutGrid, Layers, LogOut, Mail, KeyRound, Download, Trash2
+  Leaf, Paperclip, Lock, LayoutGrid, Layers, LogOut, Mail, KeyRound, Download, Trash2, Copy, Share2
 } from "lucide-react";
 import { api } from "./api.js";
 
@@ -1087,63 +1087,194 @@ function TodoScreen({ tasks, back, onToggle, onAdd }) {
   );
 }
 
-function GroupsListScreen({ back, groups, go, onCreate, onJoin, activeId }) {
-  const [mode, setMode] = useState(null); // null | "create" | "join"
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Older browsers / non-secure contexts: fall back to a hidden textarea.
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function inviteLinkFor(code) {
+  return `${window.location.origin}/?join=${code}`;
+}
+
+// Create / join flow. Creating is two steps: name it, then a "share the
+// invite" screen — so the person leaves with the code in hand instead of
+// being dropped into an empty chat with no idea how to bring anyone in.
+function GroupFlowModal({ initialMode, onClose, onCreate, onJoin, go }) {
+  const isDesktop = useIsDesktop();
+  const [mode, setMode] = useState(initialMode); // "create" | "join"
   const [input, setInput] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [created, setCreated] = useState(null);
+  const [copied, setCopied] = useState("");
+
+  function switchMode(next) {
+    setMode(next);
+    setInput("");
+    setError("");
+  }
 
   async function submit() {
-    if (!input.trim()) return;
-    setSaving(true);
+    const value = input.trim();
+    if (!value || busy) return;
+    setBusy(true);
     setError("");
     try {
-      if (mode === "create") await onCreate(input.trim());
-      else await onJoin(input.trim());
-      setMode(null);
-      setInput("");
+      if (mode === "create") {
+        setCreated(await onCreate(value));
+      } else {
+        await onJoin(value.toLowerCase());
+        onClose();
+      }
     } catch (err) {
       setError(err.message || "Something went wrong.");
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
+
+  async function copy(kind, text) {
+    if (await copyToClipboard(text)) {
+      setCopied(kind);
+      setTimeout(() => setCopied(""), 1800);
+    }
+  }
+
+  function share() {
+    navigator.share({
+      title: `Join ${created.name} on Orbit`,
+      text: `Join my study group "${created.name}" on Orbit.`,
+      url: inviteLinkFor(created.invite_code),
+    }).catch(() => {}); // dismissing the share sheet isn't an error
+  }
+
+  const tabStyle = (active) => ({
+    flex: 1, padding: "9px 0", borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13,
+    background: active ? T.panel : "transparent", color: active ? T.ink : T.inkSoft,
+    boxShadow: active ? "0 1px 4px rgba(8,28,19,0.12)" : "none",
+  });
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(8,28,19,0.6)", zIndex: 100, display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", padding: isDesktop ? 24 : 0 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: isDesktop ? 20 : "20px 20px 0 0", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", ...STARFIELD_BG }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px 12px", borderBottom: `1px solid ${T.line}` }}>
+          <span style={{ fontWeight: 800, fontSize: 16, color: T.ink }}>{created ? "Group created" : mode === "create" ? "New group" : "Join a group"}</span>
+          <button onClick={onClose} style={iconBtnStyle} aria-label="Close"><X size={16} color={T.ink} /></button>
+        </div>
+
+        {!created ? (
+          <div style={{ padding: "16px 20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", gap: 4, background: T.primarySoft, borderRadius: 12, padding: 4 }}>
+              <button onClick={() => switchMode("create")} style={tabStyle(mode === "create")}>Create</button>
+              <button onClick={() => switchMode("join")} style={tabStyle(mode === "join")}>Join with code</button>
+            </div>
+            <FieldLabel>{mode === "create" ? "Group name" : "Invite code"}</FieldLabel>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder={mode === "create" ? "e.g. Physics Study Group" : "8-character code"}
+              maxLength={mode === "create" ? 60 : 32}
+              autoFocus
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 12, color: T.inkFaint, marginTop: -4 }}>
+              {mode === "create"
+                ? "You'll get an invite code and link to share as soon as it's created."
+                : "Ask a group member for their invite code, or open the invite link they sent you."}
+            </div>
+            <ErrorBanner message={error} />
+            <button onClick={submit} disabled={busy || !input.trim()} style={{ ...primaryBtn, opacity: busy || !input.trim() ? 0.6 : 1 }}>
+              {busy ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : mode === "create" ? "Create group" : "Join group"}
+            </button>
+          </div>
+        ) : (
+          <div style={{ padding: "18px 20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ width: 52, height: 52, borderRadius: 999, background: T.primarySoft, color: T.primary, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}><Users size={24} /></div>
+              <div style={{ fontWeight: 800, fontSize: 17, color: T.ink }}>{created.name}</div>
+              <div style={{ fontSize: 13, color: T.inkSoft, marginTop: 2 }}>Invite people with this code or link.</div>
+            </div>
+            <div style={{ background: T.primarySoft, border: `1px dashed ${T.primary}`, borderRadius: 14, padding: "14px 10px", textAlign: "center" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.inkSoft, letterSpacing: 0.6, textTransform: "uppercase" }}>Invite code</div>
+              <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 26, fontWeight: 800, letterSpacing: 3, color: T.ink, marginTop: 4, userSelect: "all" }}>{created.invite_code}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => copy("code", created.invite_code)} style={{ ...secondaryBtn, flex: 1 }}>
+                {copied === "code" ? <Check size={15} color={T.primary} /> : <Copy size={15} />} {copied === "code" ? "Copied" : "Copy code"}
+              </button>
+              <button onClick={() => copy("link", inviteLinkFor(created.invite_code))} style={{ ...secondaryBtn, flex: 1 }}>
+                {copied === "link" ? <Check size={15} color={T.primary} /> : <Copy size={15} />} {copied === "link" ? "Copied" : "Copy link"}
+              </button>
+            </div>
+            {typeof navigator !== "undefined" && navigator.share && (
+              <button onClick={share} style={secondaryBtn}><Share2 size={15} /> Share…</button>
+            )}
+            <button onClick={() => { onClose(); go("group", created.id); }} style={primaryBtn}>Open chat</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GroupsListScreen({ back, groups, go, onCreate, onJoin, activeId }) {
+  const [flow, setFlow] = useState(null); // null | "create" | "join"
 
   return (
     <div>
       <TopBar title="Groups" />
       <div style={screenBox}>
-        {groups.length === 0 && !mode && <div style={{ fontSize: 13, color: T.inkFaint, padding: "10px 0" }}>You're not in any groups yet.</div>}
+        {groups.length === 0 && (
+          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
+            <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><Users size={18} /></div>
+            <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>No groups yet</div>
+            <div style={{ fontSize: 12.5, color: T.inkFaint }}>Start one for your class or study crew, or join a friend's with an invite code.</div>
+          </div>
+        )}
         {groups.map((g) => (
           <div key={g.id} onClick={() => go("group", g.id)} style={{ ...rowCardStyle, cursor: "pointer", ...(g.id === activeId ? { border: `1px solid ${T.primary}`, background: T.primarySoft } : {}) }}>
             <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><Users size={18} /></div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>{g.name}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</div>
               <div style={{ fontSize: 12, color: T.inkFaint }}>{g.member_count} member{g.member_count === 1 ? "" : "s"} · code {g.invite_code}</div>
             </div>
             <ChevronRight size={17} color={T.inkFaint} />
           </div>
         ))}
 
-        {mode ? (
-          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
-            <FieldLabel>{mode === "create" ? "Group name" : "Invite code"}</FieldLabel>
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={mode === "create" ? "Study Group" : "8-character code"} style={inputStyle} autoFocus onKeyDown={(e) => e.key === "Enter" && submit()} />
-            <ErrorBanner message={error} />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => { setMode(null); setError(""); }} style={{ ...secondaryBtn, flex: 1 }}>Cancel</button>
-              <button onClick={submit} disabled={saving || !input.trim()} style={{ ...primaryBtn, flex: 1, opacity: saving || !input.trim() ? 0.6 : 1 }}>
-                {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : mode === "create" ? "Create" : "Join"}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button onClick={() => setMode("create")} style={{ ...primaryBtn, flex: 1 }}><Plus size={16} /> New group</button>
-            <button onClick={() => setMode("join")} style={{ ...secondaryBtn, flex: 1 }}>Join with code</button>
-          </div>
-        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <button onClick={() => setFlow("create")} style={{ ...primaryBtn, flex: 1 }}><Plus size={16} /> New group</button>
+          <button onClick={() => setFlow("join")} style={{ ...secondaryBtn, flex: 1 }}>Join with code</button>
+        </div>
       </div>
+      {flow && <GroupFlowModal initialMode={flow} onClose={() => setFlow(null)} onCreate={onCreate} onJoin={onJoin} go={go} />}
     </div>
   );
 }
@@ -1154,6 +1285,7 @@ function GroupScreen({ back, user, group, embedded = false }) {
   const [connected, setConnected] = useState(false);
   const [authFailed, setAuthFailed] = useState(false);
   const [showCode, setShowCode] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const wsRef = useRef(null);
   const scrollRef = useRef(null);
 
@@ -1197,6 +1329,10 @@ function GroupScreen({ back, user, group, embedded = false }) {
       {showCode && (
         <div style={{ margin: "0 20px 10px", fontSize: 12, color: T.inkSoft, background: T.primarySoft, borderRadius: 10, padding: "8px 12px" }}>
           Invite code: <strong>{group.invite_code}</strong> · {group.member_count} member{group.member_count === 1 ? "" : "s"}
+          <span
+            onClick={async () => { if (await copyToClipboard(inviteLinkFor(group.invite_code))) { setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1800); } }}
+            style={{ marginLeft: 10, fontWeight: 700, color: T.primary, cursor: "pointer" }}
+          >{linkCopied ? "Link copied ✓" : "Copy invite link"}</span>
         </div>
       )}
       {authFailed && <div style={{ margin: "0 20px 10px" }}><ErrorBanner message="Your session couldn't be verified for chat. Try signing out and back in." /></div>}
@@ -1580,7 +1716,7 @@ function GroupsWorkspace({ groups, activeGroup, user, go, onCreate, onJoin }) {
   );
 }
 
-function MainShell({ user, onLogout, onUserUpdate }) {
+function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandled }) {
   const [screen, setScreen] = useState("home");
   const [activeFolder, setActiveFolder] = useState(null);
   const [activeGroupId, setActiveGroupId] = useState(null);
@@ -1593,6 +1729,8 @@ function MainShell({ user, onLogout, onUserUpdate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const isDesktop = useIsDesktop();
+  const [inviteNotice, setInviteNotice] = useState("");
+  const joinTriedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1615,6 +1753,16 @@ function MainShell({ user, onLogout, onUserUpdate }) {
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
   }, []);
+
+  // Someone opened an invite link (?join=CODE): join once their data has loaded.
+  useEffect(() => {
+    if (loading || !pendingJoinCode || joinTriedRef.current) return;
+    joinTriedRef.current = true;
+    joinGroup(pendingJoinCode)
+      .catch((err) => setInviteNotice(err.message || "Couldn't join that group — the invite may be invalid."))
+      .finally(() => onJoinHandled && onJoinHandled());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, pendingJoinCode]);
 
   function go(target, param) {
     if (target === "folder") setActiveFolder(param);
@@ -1668,8 +1816,7 @@ function MainShell({ user, onLogout, onUserUpdate }) {
   async function createGroup(name) {
     const created = await api.groups.create({ name });
     setGroups((prev) => [...prev, created]);
-    setActiveGroupId(created.id);
-    setScreen("group");
+    return created; // GroupFlowModal shows the invite step, then opens the chat
   }
 
   async function joinGroup(inviteCode) {
@@ -1732,6 +1879,12 @@ function MainShell({ user, onLogout, onUserUpdate }) {
 
       <div className="orbit-main" style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "center" }}>
         <div className="orbit-frame" style={{ width: "100%", maxWidth: 420, background: T.bg, position: "relative", minHeight: "640px" }}>
+          {inviteNotice && (
+            <div style={{ margin: "12px 20px 0" }}>
+              <ErrorBanner message={inviteNotice} />
+              <div onClick={() => setInviteNotice("")} style={{ fontSize: 12, fontWeight: 700, color: T.inkSoft, cursor: "pointer", marginTop: 4 }}>Dismiss</div>
+            </div>
+          )}
           <div key={screen} className={["archive", "folder", "home", "todo", "reminders", "calendar", "groupslist", "group", "capture"].includes(screen) ? "orbit-page" : "orbit-page orbit-narrow"} style={{ animation: "fadeIn 0.32s ease" }}>{renderScreen()}</div>
           <div className="orbit-bottomnav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 420, margin: "0 auto", background: T.panel, borderTop: `1px solid ${T.line}`, padding: "10px 22px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             {MOBILE_NAV.map((n) => n.key === "capture" ? (
@@ -1775,6 +1928,24 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("resetToken"));
+  // An invite link (?join=CODE) must survive sign-in / sign-up, so it's parked
+  // in sessionStorage and removed from the address bar straight away.
+  const [pendingJoin, setPendingJoin] = useState(() => {
+    const valid = (c) => (c && /^[a-z0-9]{4,32}$/i.test(c) ? c.toLowerCase() : null);
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = valid(params.get("join"));
+    if (params.has("join")) {
+      params.delete("join");
+      const qs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+    }
+    try {
+      if (fromUrl) sessionStorage.setItem("orbit_join", fromUrl);
+      return fromUrl || valid(sessionStorage.getItem("orbit_join"));
+    } catch {
+      return fromUrl;
+    }
+  });
 
   useEffect(() => {
     const token = api.getToken();
@@ -1789,6 +1960,11 @@ export default function App() {
     });
   }
 
+  function clearPendingJoin() {
+    try { sessionStorage.removeItem("orbit_join"); } catch { /* storage unavailable */ }
+    setPendingJoin(null);
+  }
+
   function clearResetToken() {
     setResetToken(null);
     // Drop ?resetToken=... from the address bar without a full reload, so
@@ -1800,9 +1976,18 @@ export default function App() {
   // isn't necessarily logged in, and shouldn't need to be.
   if (resetToken) return <ResetPasswordScreen token={resetToken} onDone={clearResetToken} />;
   if (checking) return <CenterSpinner label="Checking your session…" />;
-  if (!user) return <AuthScreen onAuthed={setUser} />;
+  if (!user) return (
+    <>
+      {pendingJoin && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 50, background: T.primarySoft, borderBottom: `1px solid ${T.line}`, color: T.ink, fontSize: 13, fontWeight: 600, textAlign: "center", padding: "10px 16px" }}>
+          You've been invited to a group — sign in or create an account to join.
+        </div>
+      )}
+      <AuthScreen onAuthed={setUser} />
+    </>
+  );
   // Only gate on verification if there's actually an email pending
   // verification — accounts with no email at all skip this entirely.
   if (user.email && !user.is_verified) return <VerifyPendingScreen user={user} onVerified={setUser} onLogout={handleLogout} />;
-  return <MainShell user={user} onLogout={handleLogout} onUserUpdate={setUser} />;
+  return <MainShell user={user} onLogout={handleLogout} onUserUpdate={setUser} pendingJoinCode={pendingJoin} onJoinHandled={clearPendingJoin} />;
 }
