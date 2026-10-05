@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   Home, FolderOpen, Plus, Users, User, Search, Bell, Camera, Calendar as CalendarIcon,
   ChevronLeft, ChevronRight, CheckSquare, Square, Clock, MapPin, TrendingUp, Sparkles,
   Send, X, Check, ArrowLeft, Shield, Zap, Star, Atom, Sigma, Wrench, FileText,
   Wifi, Mic, ListTodo, BarChart3, ChevronDown, AlertCircle, Loader2,
-  Leaf, Paperclip, Lock, LayoutGrid, Layers, LogOut, Mail, KeyRound, Download, Trash2, Copy, Share2
+  Leaf, Paperclip, Lock, LayoutGrid, Layers, LogOut, Mail, KeyRound, Download, Trash2, Copy, Share2,
+  BookOpen, FlaskConical, Code, Calculator, Lightbulb, GraduationCap, Globe, Palette, Music, Heart, Briefcase,
+  Pencil, ChevronUp
 } from "lucide-react";
 import { api } from "./api.js";
 
@@ -96,7 +98,29 @@ const FOLDER_META = {
   "Workshops": { color: "#7FE0A8", icon: Wrench },
   "Personal": { color: "#2F9159", icon: User },
 };
-const FOLDER_NAMES = Object.keys(FOLDER_META);
+
+// Icons a person can pick for a folder. Keys are stored on the server — keep in
+// sync with FOLDER_ICON_KEYS in schemas.py.
+const FOLDER_ICONS = {
+  folder: FolderOpen, leaf: Leaf, sigma: Sigma, atom: Atom, users: Users, wrench: Wrench, user: User,
+  file: FileText, star: Star, sparkles: Sparkles, book: BookOpen, flask: FlaskConical, code: Code,
+  calculator: Calculator, lightbulb: Lightbulb, graduation: GraduationCap, globe: Globe, palette: Palette,
+  music: Music, heart: Heart, briefcase: Briefcase,
+};
+const FOLDER_COLORS = [
+  "#00674F", "#009B77", "#2F9159", "#046307", "#D4AF37", "#D68A0C",
+  "#E2456B", "#A855F7", "#5B3FE0", "#0891B2", "#7FE0A8", "#64748B",
+];
+
+// How a folder looks. Falls back to the old name-based lookup for any folder
+// saved before icons existed.
+function folderMeta(folder) {
+  const legacy = (folder && FOLDER_META[folder.name]) || null;
+  return {
+    icon: (folder && FOLDER_ICONS[folder.icon]) || (legacy && legacy.icon) || FolderOpen,
+    color: (folder && folder.color) || (legacy && legacy.color) || T.primary,
+  };
+}
 const EVENT_COLORS = [T.primary, "#D4AF37", "#009B77", "#046307", "#00674F", "#7FE0A8"];
 
 /* ------------------------------- UTILITIES ---------------------------------- */
@@ -118,12 +142,13 @@ function fileToBase64(file) {
   });
 }
 
-function matchFolder(name) {
-  if (!name) return "Personal";
-  const hit = FOLDER_NAMES.find(
-    (f) => f.toLowerCase() === String(name).toLowerCase() || String(name).toLowerCase().includes(f.toLowerCase())
-  );
-  return hit || "Personal";
+// Maps the AI's suggested folder onto one of the person's own folders.
+function matchFolder(name, folderNames) {
+  const fallback = folderNames.includes("Personal") ? "Personal" : folderNames[0] || "";
+  if (!name) return fallback;
+  const wanted = String(name).toLowerCase();
+  const hit = folderNames.find((f) => f.toLowerCase() === wanted) || folderNames.find((f) => wanted.includes(f.toLowerCase()));
+  return hit || fallback;
 }
 
 /* ------------------------------ SMALL PIECES --------------------------------- */
@@ -654,8 +679,8 @@ function VerifyPendingScreen({ user, onVerified, onLogout }) {
 
 /* --------------------------------- SCREENS ------------------------------------ */
 
-function HomeScreen({ folders, tasks, go, user }) {
-  const recentEntries = FOLDER_NAMES.map((f) => folders[f]).filter((f) => f && f.items.length)
+function HomeScreen({ folderList, tasks, go, user }) {
+  const recentEntries = folderList.filter((f) => f.items.length)
     .sort((a, b) => (a.items[0]?.created_at < b.items[0]?.created_at ? 1 : -1)).slice(0, 4);
 
   return (
@@ -695,7 +720,7 @@ function HomeScreen({ folders, tasks, go, user }) {
         </div>
         {recentEntries.length === 0 && <div style={{ fontSize: 13, color: T.inkFaint }}>Nothing captured yet — try the camera above.</div>}
         {recentEntries.map((f) => {
-          const meta = FOLDER_META[f.name] || FOLDER_META.Personal;
+          const meta = folderMeta(f);
           const Icon = meta.icon;
           return (
             <div key={f.id} onClick={() => go("folder", f.name)} style={rowCardStyle}>
@@ -728,39 +753,203 @@ function HomeScreen({ folders, tasks, go, user }) {
   );
 }
 
-function ArchiveScreen({ folders, go }) {
+// Create / edit / delete a folder. `folder` is null when creating.
+function FolderEditorModal({ folder, onClose, onSave, onDelete }) {
+  const isDesktop = useIsDesktop();
+  const editing = !!folder;
+  const initial = folderMeta(folder || {});
+  const [name, setName] = useState(folder ? folder.name : "");
+  const [color, setColor] = useState(folder ? initial.color : FOLDER_COLORS[0]);
+  const [icon, setIcon] = useState(folder && folder.icon && FOLDER_ICONS[folder.icon] ? folder.icon : folder ? Object.keys(FOLDER_ICONS).find((k) => FOLDER_ICONS[k] === initial.icon) || "folder" : "folder");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const PreviewIcon = FOLDER_ICONS[icon] || FolderOpen;
+  const itemCount = folder ? folder.items.length : 0;
+
+  async function save() {
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onSave({ name: trimmed, color, icon });
+      onClose();
+    } catch (err) {
+      setError(err.message || "Couldn't save this folder.");
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    setError("");
+    try {
+      await onDelete();
+      onClose();
+    } catch (err) {
+      setError(err.message || "Couldn't delete this folder.");
+      setBusy(false);
+    }
+  }
+
   return (
-    <div>
-      <TopBar title="My Archive" />
-      <div className="orbit-grid" style={screenBox}>
-        {FOLDER_NAMES.map((name) => {
-          const folder = folders[name];
-          if (!folder) return null;
-          const meta = FOLDER_META[name];
-          const Icon = meta.icon;
-          return (
-            <div key={folder.id} onClick={() => go("folder", name)} style={{ ...rowCardStyle, cursor: "pointer" }}>
-              <div style={{ ...iconTileStyle, background: `${meta.color}1A`, color: meta.color }}><Icon size={18} /></div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>{name}</div>
-                <div style={{ fontSize: 12.5, color: T.inkFaint }}>{folder.items.length} items</div>
-              </div>
-              <ChevronRight size={17} color={T.inkFaint} />
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(8,28,19,0.6)", zIndex: 100, display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", padding: isDesktop ? 24 : 0 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: isDesktop ? 20 : "20px 20px 0 0", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", ...STARFIELD_BG }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px 12px", borderBottom: `1px solid ${T.line}` }}>
+          <span style={{ fontWeight: 800, fontSize: 16, color: T.ink }}>{editing ? "Edit folder" : "New folder"}</span>
+          <button onClick={onClose} style={iconBtnStyle} aria-label="Close"><X size={16} color={T.ink} /></button>
+        </div>
+
+        <div style={{ padding: "16px 20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ ...rowCardStyle, gap: 12 }}>
+            <div style={{ ...iconTileStyle, background: `${color}1A`, color }}><PreviewIcon size={18} /></div>
+            <div style={{ fontWeight: 700, fontSize: 14.5, color: name.trim() ? T.ink : T.inkFaint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name.trim() || "Folder name"}</div>
+          </div>
+
+          <div>
+            <FieldLabel>Name</FieldLabel>
+            <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} placeholder="e.g. Chemistry 101" maxLength={40} autoFocus style={{ ...inputStyle, marginTop: 6 }} />
+          </div>
+
+          <div>
+            <FieldLabel>Color</FieldLabel>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+              {FOLDER_COLORS.map((c) => (
+                <button key={c} type="button" onClick={() => setColor(c)} aria-label={`Color ${c}`} style={{ width: 30, height: 30, borderRadius: 999, background: c, cursor: "pointer", border: color === c ? `3px solid ${T.ink}` : "3px solid transparent", boxShadow: color === c ? `0 0 0 2px ${T.panel} inset` : "none", padding: 0 }} />
+              ))}
             </div>
-          );
-        })}
+          </div>
+
+          <div>
+            <FieldLabel>Icon</FieldLabel>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8, marginTop: 8 }}>
+              {Object.entries(FOLDER_ICONS).map(([key, Ico]) => (
+                <button key={key} type="button" onClick={() => setIcon(key)} aria-label={`Icon ${key}`} style={{ aspectRatio: "1", borderRadius: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", background: icon === key ? `${color}1A` : T.panel, border: `1px solid ${icon === key ? color : T.line}`, color: icon === key ? color : T.inkSoft, padding: 0 }}>
+                  <Ico size={17} />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <ErrorBanner message={error} />
+
+          <button onClick={save} disabled={busy || !name.trim()} style={{ ...primaryBtn, opacity: busy || !name.trim() ? 0.6 : 1 }}>
+            {busy && !confirmDelete ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : editing ? "Save changes" : "Create folder"}
+          </button>
+
+          {editing && onDelete && (
+            confirmDelete ? (
+              <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10, border: `1px solid ${T.danger}` }}>
+                <div style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>
+                  Delete <strong>{folder.name}</strong>{itemCount > 0 ? <> and its {itemCount} item{itemCount === 1 ? "" : "s"}</> : null}? This can't be undone.
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button type="button" disabled={busy} onClick={() => setConfirmDelete(false)} style={{ ...secondaryBtn, flex: 1 }}>Keep it</button>
+                  <button type="button" disabled={busy} onClick={remove} style={{ ...secondaryBtn, flex: 1, background: T.danger, color: "#fff", border: "none" }}>
+                    {busy ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : "Delete"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setConfirmDelete(true)} style={{ ...secondaryBtn, color: T.danger }}><Trash2 size={15} /> Delete folder</button>
+            )
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function FolderDetailScreen({ name, folder, go, back, onDeleteItem }) {
-  const meta = FOLDER_META[name] || FOLDER_META.Personal;
+function ArchiveScreen({ folderList, go, onCreate, onUpdate, onDelete, onMove }) {
+  const [customizing, setCustomizing] = useState(false);
+  const [modal, setModal] = useState(null); // null | { folder: Folder | null }
+
+  return (
+    <div>
+      <TopBar
+        title="My Archive"
+        right={folderList.length > 0 && (
+          <button
+            onClick={() => setCustomizing((c) => !c)}
+            aria-label={customizing ? "Done customizing" : "Customize folders"}
+            title={customizing ? "Done" : "Customize folders"}
+            style={{ ...iconBtnStyle, ...(customizing ? { background: T.primarySoft, border: `1px solid ${T.primary}` } : {}) }}
+          >
+            {customizing ? <Check size={16} color={T.primary} /> : <Pencil size={15} color={T.ink} />}
+          </button>
+        )}
+      />
+      {customizing && (
+        <div style={{ padding: "0 20px 10px", fontSize: 12.5, color: T.inkSoft }}>
+          Tap a folder to edit it, or use the arrows to change the order.
+        </div>
+      )}
+      <div className="orbit-grid" style={{ ...screenBox, paddingBottom: 14 }}>
+        {folderList.length === 0 && (
+          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
+            <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><FolderOpen size={18} /></div>
+            <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>No folders yet</div>
+            <div style={{ fontSize: 12.5, color: T.inkFaint }}>Create a folder for each class or project to keep your notes sorted.</div>
+          </div>
+        )}
+        {folderList.map((folder, i) => {
+          const meta = folderMeta(folder);
+          const Icon = meta.icon;
+          return (
+            <div key={folder.id} onClick={() => (customizing ? setModal({ folder }) : go("folder", folder.name))} style={{ ...rowCardStyle, cursor: "pointer" }}>
+              <div style={{ ...iconTileStyle, background: `${meta.color}1A`, color: meta.color }}><Icon size={18} /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{folder.name}</div>
+                <div style={{ fontSize: 12.5, color: T.inkFaint }}>{folder.items.length} item{folder.items.length === 1 ? "" : "s"}</div>
+              </div>
+              {customizing ? (
+                <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                  <button disabled={i === 0} onClick={() => onMove(folder.id, -1)} aria-label="Move earlier" style={{ ...iconBtnStyle, width: 32, height: 32, opacity: i === 0 ? 0.35 : 1 }}><ChevronUp size={15} color={T.ink} /></button>
+                  <button disabled={i === folderList.length - 1} onClick={() => onMove(folder.id, 1)} aria-label="Move later" style={{ ...iconBtnStyle, width: 32, height: 32, opacity: i === folderList.length - 1 ? 0.35 : 1 }}><ChevronDown size={15} color={T.ink} /></button>
+                  <button onClick={() => setModal({ folder })} aria-label="Edit folder" style={{ ...iconBtnStyle, width: 32, height: 32 }}><Pencil size={14} color={T.ink} /></button>
+                </div>
+              ) : (
+                <ChevronRight size={17} color={T.inkFaint} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ padding: "0 20px 100px" }}>
+        <button onClick={() => setModal({ folder: null })} style={{ ...primaryBtn, width: "100%", boxSizing: "border-box" }}><Plus size={16} /> New folder</button>
+      </div>
+      {modal && (
+        <FolderEditorModal
+          folder={modal.folder}
+          onClose={() => setModal(null)}
+          onSave={(payload) => (modal.folder ? onUpdate(modal.folder.id, payload) : onCreate(payload))}
+          onDelete={modal.folder ? () => onDelete(modal.folder.id) : null}
+        />
+      )}
+    </div>
+  );
+}
+
+function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const meta = folderMeta(folder || { name });
   const Icon = meta.icon;
   const items = folder ? folder.items : [];
   return (
     <div>
-      <TopBar title={name} onBack={back} />
+      <TopBar
+        title={name}
+        onBack={back}
+        right={folder && <button onClick={() => setEditing(true)} aria-label="Edit folder" title="Edit folder" style={iconBtnStyle}><Pencil size={15} color={T.ink} /></button>}
+      />
       <div style={screenBox}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: -4 }}>
           <div style={{ ...iconTileStyle, background: `${meta.color}1A`, color: meta.color }}><Icon size={18} /></div>
@@ -783,18 +972,27 @@ function FolderDetailScreen({ name, folder, go, back, onDeleteItem }) {
         </div>
         <button onClick={() => go("capture")} style={{ ...primaryBtn, marginTop: 6 }}><Plus size={16} /> Add to {name}</button>
       </div>
+      {editing && folder && (
+        <FolderEditorModal
+          folder={folder}
+          onClose={() => setEditing(false)}
+          onSave={(payload) => onUpdate(folder.id, payload)}
+          onDelete={async () => { await onDelete(folder.id); back(); }}
+        />
+      )}
     </div>
   );
 }
 
 function CaptureScreen({ back, onSave, folders }) {
+  const folderNames = Object.keys(folders);
   const inputRef = useRef(null);
   const [image, setImage] = useState(null);
   const [mediaType, setMediaType] = useState("image/jpeg");
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
   const [title, setTitle] = useState("");
-  const [folder, setFolder] = useState("Personal");
+  const [folder, setFolder] = useState(folderNames.includes("Personal") ? "Personal" : folderNames[0] || "");
   const [tags, setTags] = useState([]);
   const [summary, setSummary] = useState("");
   const [tagInput, setTagInput] = useState("");
@@ -809,9 +1007,9 @@ function CaptureScreen({ back, onSave, folders }) {
     try {
       const b64 = await fileToBase64(file);
       setImage(b64);
-      const result = await api.ai.analyze({ image_base64: b64, media_type: file.type || "image/jpeg", candidate_folders: FOLDER_NAMES });
+      const result = await api.ai.analyze({ image_base64: b64, media_type: file.type || "image/jpeg", candidate_folders: folderNames });
       setTitle(result.title || "Untitled note");
-      setFolder(matchFolder(result.folder));
+      setFolder(matchFolder(result.folder, folderNames));
       setTags(Array.isArray(result.tags) ? result.tags.slice(0, 5) : []);
       setSummary(result.summary || "");
       setStatus("ready");
@@ -830,7 +1028,7 @@ function CaptureScreen({ back, onSave, folders }) {
   async function save() {
     if (!title.trim()) return;
     const targetFolder = folders[folder];
-    if (!targetFolder) { setError(`Folder "${folder}" wasn't found on the server.`); return; }
+    if (!targetFolder) { setError(folderNames.length ? `Folder "${folder}" wasn't found.` : "Create a folder in your Archive first, then come back to save this."); return; }
     setSaving(true);
     setError("");
     try {
@@ -885,7 +1083,7 @@ function CaptureScreen({ back, onSave, folders }) {
               <FieldLabel>Add to folder</FieldLabel>
               <div style={{ position: "relative" }}>
                 <select value={folder} onChange={(e) => setFolder(e.target.value)} style={selectStyle}>
-                  {FOLDER_NAMES.map((f) => <option key={f} value={f}>{f}</option>)}
+                  {folderNames.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
                 <ChevronDown size={16} color={T.inkFaint} style={{ position: "absolute", right: 14, top: 14, pointerEvents: "none" }} />
               </div>
@@ -1502,12 +1700,24 @@ async function accountRequest(path, options = {}) {
     try {
       const body = await res.json();
       if (body && typeof body.detail === "string") msg = body.detail;
+      else if (body && Array.isArray(body.detail) && body.detail.length) {
+        msg = body.detail.map((d) => String((d && d.msg) || "Invalid value").replace(/^Value error,\s*/i, "")).join(" ");
+      }
     } catch { /* non-JSON error body */ }
     if (res.status === 429) msg = "Too many attempts — please wait a bit and try again.";
     throw new Error(msg);
   }
   return res;
 }
+
+// Folder customization calls (kept here so api.js doesn't need changes).
+const folderApi = {
+  update: (id, patch) =>
+    accountRequest(`/folders/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }).then((r) => r.json()),
+  remove: (id) => accountRequest(`/folders/${id}`, { method: "DELETE" }),
+  reorder: (ids) =>
+    accountRequest("/folders/order", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }),
+};
 
 function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
   const [emailInput, setEmailInput] = useState("");
@@ -1720,7 +1930,8 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   const [screen, setScreen] = useState("home");
   const [activeFolder, setActiveFolder] = useState(null);
   const [activeGroupId, setActiveGroupId] = useState(null);
-  const [folders, setFolders] = useState({});
+  const [folderList, setFolderList] = useState([]); // ordered the way the person arranged them
+  const folders = useMemo(() => Object.fromEntries(folderList.map((f) => [f.name, f])), [folderList]);
   const [tasks, setTasks] = useState([]);
   const [reminders, setReminders] = useState([]);
   const [events, setEvents] = useState([]);
@@ -1740,9 +1951,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     ])
       .then(([f, t, r, ev, ss, gr]) => {
         if (cancelled) return;
-        const byName = {};
-        f.forEach((folder) => { byName[folder.name] = folder; });
-        setFolders(byName);
+        setFolderList(f);
         setTasks(t);
         setReminders(r);
         setEvents(ev);
@@ -1772,7 +1981,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
 
   async function saveItem(folderId, folderName, payload) {
     const item = await api.folders.addItem(folderId, payload);
-    setFolders((prev) => ({ ...prev, [folderName]: { ...prev[folderName], items: [item, ...prev[folderName].items] } }));
+    setFolderList((prev) => prev.map((f) => (f.name === folderName ? { ...f, items: [item, ...f.items] } : f)));
     setActiveFolder(folderName);
     setScreen("folder");
   }
@@ -1780,8 +1989,43 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   async function deleteItem(itemId) {
   if (!window.confirm("Delete this item? This can't be undone.")) return;
   await api.items.delete(itemId);
-  setFolders((prev) => ({ ...prev, [activeFolder]: { ...prev[activeFolder], items: prev[activeFolder].items.filter((i) => i.id !== itemId) } }));
+  setFolderList((prev) => prev.map((f) => (f.name === activeFolder ? { ...f, items: f.items.filter((i) => i.id !== itemId) } : f)));
 }
+
+  async function createFolder(payload) {
+    const created = await api.folders.create(payload);
+    setFolderList((prev) => [...prev, created]);
+    return created;
+  }
+
+  async function updateFolder(id, patch) {
+    const old = folderList.find((f) => f.id === id);
+    const updated = await folderApi.update(id, patch);
+    setFolderList((prev) => prev.map((f) => (f.id === id ? updated : f)));
+    if (old && activeFolder === old.name) setActiveFolder(updated.name); // keep the open folder open after a rename
+    return updated;
+  }
+
+  async function deleteFolder(id) {
+    await folderApi.remove(id);
+    setFolderList((prev) => prev.filter((f) => f.id !== id));
+  }
+
+  async function moveFolder(id, direction) {
+    const from = folderList.findIndex((f) => f.id === id);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= folderList.length) return;
+    const previous = folderList;
+    const next = [...folderList];
+    [next[from], next[to]] = [next[to], next[from]];
+    setFolderList(next); // optimistic — the list reorders instantly
+    try {
+      await folderApi.reorder(next.map((f) => f.id));
+    } catch (err) {
+      setFolderList(previous);
+      setInviteNotice(err.message || "Couldn't save the new folder order.");
+    }
+  }
 
   async function toggleTask(task) {
     const updated = await api.tasks.update(task.id, { done: !task.done });
@@ -1840,9 +2084,9 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   );
 
     switch (screen) {
-      case "home": return <HomeScreen folders={folders} tasks={tasks} go={go} user={user} />;
-      case "archive": return <ArchiveScreen folders={folders} go={go} />;
-      case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} />;
+      case "home": return <HomeScreen folderList={folderList} tasks={tasks} go={go} user={user} />;
+      case "archive": return <ArchiveScreen folderList={folderList} go={go} onCreate={createFolder} onUpdate={updateFolder} onDelete={deleteFolder} onMove={moveFolder} />;
+      case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} onUpdate={updateFolder} onDelete={deleteFolder} />;
       case "capture": return <CaptureScreen back={() => setScreen("home")} onSave={saveItem} folders={folders} />;
       case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} />;
       case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} />;

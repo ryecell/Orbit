@@ -81,7 +81,11 @@ class Folder(Base):
 
     id = Column(String, primary_key=True, default=gen_id)
     name = Column(String, nullable=False)
-    color = Column(String, default="#5B3FE0")
+    color = Column(String, default="#00674F")
+    # Key into the frontend's icon set (e.g. "leaf", "atom"); NULL falls back to a default.
+    icon = Column(String, nullable=True)
+    # User-chosen order in the Archive list (ascending).
+    position = Column(Integer, nullable=False, default=0, server_default="0")
     owner_id = Column(String, ForeignKey("users.id"), nullable=False)
 
     owner = relationship("User", back_populates="folders")

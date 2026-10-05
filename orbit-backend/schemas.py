@@ -108,15 +108,86 @@ class ItemCreate(BaseModel):
     tags: List[str] = []
 
 
+# Keep in sync with FOLDER_ICONS in the frontend's App.jsx.
+FOLDER_ICON_KEYS = {
+    "folder", "leaf", "sigma", "atom", "users", "wrench", "user", "file", "star", "sparkles",
+    "book", "flask", "code", "calculator", "lightbulb", "graduation", "globe", "palette",
+    "music", "heart", "briefcase",
+}
+HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _clean_folder_name(v: str) -> str:
+    v = " ".join(v.split())  # trims and collapses runs of whitespace/newlines
+    if not v:
+        raise ValueError("Folder name can't be empty")
+    return v
+
+
+def _check_color(v: str) -> str:
+    if not HEX_COLOR.match(v):
+        raise ValueError("Color must look like #00674F")
+    return v
+
+
+def _check_icon(v: str) -> str:
+    if v not in FOLDER_ICON_KEYS:
+        raise ValueError("Unknown folder icon")
+    return v
+
+
 class FolderCreate(BaseModel):
-    name: str
-    color: str = "#5B3FE0"
+    name: str = Field(min_length=1, max_length=40)
+    color: str = "#00674F"
+    icon: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        return _clean_folder_name(v)
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, v: str) -> str:
+        return _check_color(v)
+
+    @field_validator("icon")
+    @classmethod
+    def _icon(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _check_icon(v)
+
+
+class FolderUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    color: Optional[str] = None
+    icon: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _clean_folder_name(v)
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _check_color(v)
+
+    @field_validator("icon")
+    @classmethod
+    def _icon(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _check_icon(v)
+
+
+class FolderReorder(BaseModel):
+    ids: List[str] = Field(min_length=1, max_length=200)
 
 
 class FolderOut(BaseModel):
     id: str
     name: str
     color: str
+    icon: Optional[str] = None
+    position: int = 0
     items: List[ItemOut] = []
 
     class Config:

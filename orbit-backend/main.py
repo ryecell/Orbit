@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -107,13 +108,14 @@ async def security_headers(request: Request, call_next):
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
 
+# (name, color, icon key) — seeded in this order for every new account.
 DEFAULT_FOLDERS = [
-    ("Biology", "#0E9F6E"),
-    ("Math 21", "#5B3FE0"),
-    ("Physics", "#E2456B"),
-    ("Group Project", "#A855F7"),
-    ("Workshops", "#D68A0C"),
-    ("Personal", "#0891B2"),
+    ("Biology", "#00674F", "leaf"),
+    ("Math 21", "#009B77", "sigma"),
+    ("Physics", "#046307", "atom"),
+    ("Group Project", "#D4AF37", "users"),
+    ("Workshops", "#7FE0A8", "wrench"),
+    ("Personal", "#2F9159", "user"),
 ]
 
 
@@ -154,8 +156,8 @@ def register(request: Request, payload: schemas.UserCreate, db: Session = Depend
     # Seed default folders. If this fails, keep the account — a missing
     # folder set is recoverable; a half-created user is worse.
     try:
-        for name, color in DEFAULT_FOLDERS:
-            db.add(models.Folder(name=name, color=color, owner_id=user.id))
+        for position, (name, color, icon) in enumerate(DEFAULT_FOLDERS):
+            db.add(models.Folder(name=name, color=color, icon=icon, position=position, owner_id=user.id))
         db.commit()
     except Exception:
         db.rollback()
@@ -333,19 +335,47 @@ def _folder_out(folder: models.Folder) -> dict:
         "id": folder.id,
         "name": folder.name,
         "color": folder.color,
+        "icon": folder.icon,
+        "position": folder.position,
         "items": [_item_out(i) for i in folder.items],
     }
 
 
 @app.get("/folders", response_model=List[schemas.FolderOut])
 def list_folders(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
-    folders = db.query(models.Folder).filter(models.Folder.owner_id == user.id).all()
+    folders = (
+        db.query(models.Folder)
+        .filter(models.Folder.owner_id == user.id)
+        .order_by(models.Folder.position.asc(), func.lower(models.Folder.name).asc())
+        .all()
+    )
     return [_folder_out(f) for f in folders]
+
+
+MAX_FOLDERS_PER_USER = 40
+
+
+def _folder_name_taken(db: Session, user: models.User, name: str, exclude_id: Optional[str] = None) -> bool:
+    # Case-insensitive: the app addresses folders by name in places (e.g. AI filing),
+    # so "physics" and "Physics" would be indistinguishable to the person anyway.
+    q = db.query(models.Folder.id).filter(models.Folder.owner_id == user.id, func.lower(models.Folder.name) == name.lower())
+    if exclude_id:
+        q = q.filter(models.Folder.id != exclude_id)
+    return q.first() is not None
 
 
 @app.post("/folders", response_model=schemas.FolderOut, status_code=status.HTTP_201_CREATED)
 def create_folder(payload: schemas.FolderCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
-    folder = models.Folder(name=payload.name, color=payload.color, owner_id=user.id)
+    count = db.query(func.count(models.Folder.id)).filter(models.Folder.owner_id == user.id).scalar() or 0
+    if count >= MAX_FOLDERS_PER_USER:
+        raise HTTPException(status_code=400, detail=f"You can have up to {MAX_FOLDERS_PER_USER} folders")
+    if _folder_name_taken(db, user, payload.name):
+        raise HTTPException(status_code=400, detail="You already have a folder with that name")
+    last = db.query(func.max(models.Folder.position)).filter(models.Folder.owner_id == user.id).scalar()
+    folder = models.Folder(
+        name=payload.name, color=payload.color, icon=payload.icon,
+        position=(last + 1) if last is not None else 0, owner_id=user.id,
+    )
     db.add(folder)
     db.commit()
     db.refresh(folder)
@@ -361,6 +391,45 @@ def _get_owned_folder(folder_id: str, db: Session, user: models.User) -> models.
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
     return folder
+
+
+@app.put("/folders/order", status_code=status.HTTP_204_NO_CONTENT)
+def reorder_folders(payload: schemas.FolderReorder, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    """Saves a new Archive order. `ids` is the desired order; any folders not listed keep their relative order after it."""
+    owned = {f.id: f for f in db.query(models.Folder).filter(models.Folder.owner_id == user.id).all()}
+    ids = list(dict.fromkeys(payload.ids))
+    if any(i not in owned for i in ids):
+        raise HTTPException(status_code=400, detail="Unknown folder in order")
+    position = 0
+    for folder_id in ids:
+        owned[folder_id].position = position
+        position += 1
+    listed = set(ids)
+    for folder in sorted((f for fid, f in owned.items() if fid not in listed), key=lambda f: (f.position, f.name.lower())):
+        folder.position = position
+        position += 1
+    db.commit()
+
+
+@app.patch("/folders/{folder_id}", response_model=schemas.FolderOut)
+def update_folder(folder_id: str, payload: schemas.FolderUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    folder = _get_owned_folder(folder_id, db, user)
+    changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+    if "name" in changes and _folder_name_taken(db, user, changes["name"], exclude_id=folder.id):
+        raise HTTPException(status_code=400, detail="You already have a folder with that name")
+    for field, value in changes.items():
+        setattr(folder, field, value)
+    db.commit()
+    db.refresh(folder)
+    return _folder_out(folder)
+
+
+@app.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_folder(folder_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    """Deletes the folder and every item inside it (cascade) — the frontend asks for confirmation first."""
+    folder = _get_owned_folder(folder_id, db, user)
+    db.delete(folder)
+    db.commit()
 
 
 @app.post("/folders/{folder_id}/items", response_model=schemas.ItemOut, status_code=status.HTTP_201_CREATED)
@@ -936,7 +1005,8 @@ async def analyze_image(request: Request, payload: schemas.AnalyzeRequest, user:
     if approx_bytes > MAX_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Image is too large (max 8MB).")
 
-    folders = payload.candidate_folders or [name for name, _ in DEFAULT_FOLDERS]
+    folders = [" ".join(str(f).split())[:40] for f in (payload.candidate_folders or [])][:MAX_FOLDERS_PER_USER]
+    folders = [f for f in folders if f] or [d[0] for d in DEFAULT_FOLDERS]
     prompt = (
         "You are the AI auto-tagging engine inside a digital archive app called Orbit. "
         "Look at this image \u2014 it may be handwritten notes, a printed document, a diagram, or a photo \u2014 "
