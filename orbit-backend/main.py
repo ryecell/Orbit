@@ -579,6 +579,7 @@ def list_study_sessions(db: Session = Depends(get_db), user: models.User = Depen
 def create_study_session(payload: schemas.StudySessionCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
     session_row = models.StudySession(
         minutes=payload.minutes,
+        title=payload.title or None,
         note=payload.note,
         started_at=payload.started_at or datetime.utcnow(),
         owner_id=user.id,
@@ -587,6 +588,33 @@ def create_study_session(payload: schemas.StudySessionCreate, db: Session = Depe
     db.commit()
     db.refresh(session_row)
     return session_row
+
+
+def _get_owned_session(session_id: str, db: Session, user: models.User) -> models.StudySession:
+    row = (
+        db.query(models.StudySession)
+        .filter(models.StudySession.id == session_id, models.StudySession.owner_id == user.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Study session not found")
+    return row
+
+
+@app.patch("/study-sessions/{session_id}", response_model=schemas.StudySessionOut)
+def rename_study_session(session_id: str, payload: schemas.StudySessionUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    row = _get_owned_session(session_id, db, user)
+    row.title = payload.title or None
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@app.delete("/study-sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_study_session(session_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    row = _get_owned_session(session_id, db, user)
+    db.delete(row)
+    db.commit()
 
 
 # ============================== GROUPS ==============================
@@ -913,7 +941,7 @@ def export_my_data(request: Request, user: models.User = Depends(auth.get_curren
             {"title": e.title, "description": e.description, "start_time": e.start_time, "end_time": e.end_time, "color": e.color}
             for e in events
         ],
-        "study_sessions": [{"started_at": s.started_at, "minutes": s.minutes, "note": s.note} for s in sessions],
+        "study_sessions": [{"started_at": s.started_at, "title": s.title, "minutes": s.minutes, "note": s.note} for s in sessions],
         "groups": [{"name": m.group.name, "joined_at": m.joined_at} for m in memberships],
         "group_messages_sent": [
             {"group": group_names.get(m.group_id, "(group you have left)"), "text": m.text, "sent_at": m.created_at}

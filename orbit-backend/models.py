@@ -170,6 +170,8 @@ class StudySession(Base):
     id = Column(String, primary_key=True, default=gen_id)
     started_at = Column(DateTime, default=datetime.utcnow)
     minutes = Column(Integer, nullable=False)
+    # What was studied ("Calculus", "Chapter 4 review") — lets Insights show where the time goes.
+    title = Column(String, nullable=True)
     note = Column(String, default="")
     owner_id = Column(String, ForeignKey("users.id"), nullable=False)
 

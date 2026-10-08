@@ -273,15 +273,35 @@ class EventOut(BaseModel):
 
 # ---------- Study sessions (Insights) ----------
 
+def _clean_session_title(v: Optional[str]) -> str:
+    return " ".join((v or "").split())[:60]  # trims, collapses whitespace, caps length
+
+
 class StudySessionCreate(BaseModel):
     minutes: int = Field(gt=0, le=24 * 60)  # a single logged session can't exceed a full day
+    title: str = ""
     note: str = ""
     started_at: Optional[datetime] = None  # defaults to now if omitted
+
+    @field_validator("title")
+    @classmethod
+    def _title(cls, v: str) -> str:
+        return _clean_session_title(v)
+
+
+class StudySessionUpdate(BaseModel):
+    title: str = ""
+
+    @field_validator("title")
+    @classmethod
+    def _title(cls, v: str) -> str:
+        return _clean_session_title(v)
 
 
 class StudySessionOut(BaseModel):
     id: str
     minutes: int
+    title: Optional[str] = None  # NULL for sessions logged before titles existed
     note: str
     started_at: datetime
 

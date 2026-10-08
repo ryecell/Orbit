@@ -130,6 +130,14 @@ const EVENT_COLORS = [T.primary, T.accent, T.teal, T.primaryLight, T.coral, T.pr
 
 function ymKey(date) { return `${date.getFullYear()}-${date.getMonth()}`; }
 function dayKey(date) { return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`; }
+
+// The API sends UTC timestamps with no timezone suffix; browsers would read
+// those as local time and shift sessions onto the wrong day. Treat them as UTC.
+function parseServerDate(value) {
+  if (!value) return new Date(NaN);
+  const s = String(value);
+  return new Date(/[zZ]$|[+-]\d\d:?\d\d$/.test(s) ? s : `${s}Z`);
+}
 function monthLabel(date) { return date.toLocaleDateString(undefined, { month: "long", year: "numeric" }); }
 function toLocalInputValue(date) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -436,6 +444,8 @@ function AuthScreen({ onAuthed }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [forgotSent, setForgotSent] = useState(false);
+  const [success, setSuccess] = useState(false); // login worked — show a short welcome beat before the app appears
+  const [shake, setShake] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
@@ -463,9 +473,13 @@ function AuthScreen({ onAuthed }) {
         : { username, password, accept_terms: agreed, ...(name.trim() && { name: name.trim() }) };
       const data = mode === "login" ? await api.login(payload) : await api.register(payload);
       api.setToken(data.access_token);
+      setSuccess(true);
+      await new Promise((resolve) => setTimeout(resolve, 850)); // let the success animation play
       onAuthed(data.user);
     } catch (err) {
       setError(err.message || "Something went wrong. Is the backend running?");
+      setShake(true);
+      setTimeout(() => setShake(false), 600);
     } finally {
       setLoading(false);
     }
@@ -478,9 +492,38 @@ function AuthScreen({ onAuthed }) {
   }
 
   return (
-    <div className="orbit-stagger" style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
+    <div className="orbit-auth" style={{ minHeight: "100vh", display: "flex", background: T.bg, ...STARFIELD_BG }}>
+      {loading && !success && <div className="orbit-topbar" aria-hidden="true"><span /></div>}
       {legalModal && <LegalModal type={legalModal} onClose={() => setLegalModal(null)} />}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 30 }}>
+
+      {/* Brand panel — only on wide screens, so the sign-in page uses the whole tab */}
+      <aside className="orbit-auth-hero" aria-hidden="true">
+        <span className="orbit-orb" style={{ width: 380, height: 380, top: -130, left: -110, background: "rgba(61,220,151,0.30)" }} />
+        <span className="orbit-orb" style={{ width: 320, height: 320, bottom: -100, right: -70, background: "rgba(217,164,65,0.22)", animationDelay: "-7s" }} />
+        <span className="orbit-orb" style={{ width: 230, height: 230, top: "46%", right: "16%", background: "rgba(14,143,154,0.24)", animationDelay: "-12s" }} />
+        {[[12, 18, 0, 5], [22, 72, 1.1, 4], [34, 38, 2.2, 6], [48, 86, 0.6, 4], [61, 14, 1.7, 5], [72, 58, 2.8, 4], [84, 30, 0.9, 6], [90, 80, 2.0, 4], [8, 52, 1.4, 4]].map(([top, left, delay, size], i) => (
+          <span key={i} className="orbit-star" style={{ top: `${top}%`, left: `${left}%`, width: size, height: size, animationDelay: `${delay}s` }} />
+        ))}
+        <div style={{ position: "relative", zIndex: 1, maxWidth: 460 }}>
+          <OrbitCatLogo size={68} animated />
+          <div style={{ fontSize: 52, fontWeight: 800, color: "#fff", letterSpacing: -1.6, lineHeight: 1.04, marginTop: 26 }}>
+            Capture it.<br />File it.<br /><span style={{ color: T.primaryBright }}>Find it.</span>
+          </div>
+          <p style={{ color: "rgba(255,255,255,0.72)", fontSize: 16.5, lineHeight: 1.6, margin: "20px 0 34px", maxWidth: 400 }}>
+            Your notes, tasks and study groups in one calm place that keeps up with you.
+          </p>
+          {[[Sparkles, "AI tags and files every photo for you"], [Users, "Study groups with live chat"], [BarChart3, "See which subjects get your time"]].map(([Ico, text]) => (
+            <div key={text} style={{ display: "flex", alignItems: "center", gap: 14, color: "rgba(255,255,255,0.88)", fontSize: 14.5, fontWeight: 600, marginBottom: 14 }}>
+              <span style={{ width: 38, height: 38, borderRadius: 12, background: "rgba(255,255,255,0.09)", border: "1px solid rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center", color: T.primaryBright }}><Ico size={18} /></span>
+              {text}
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <main className="orbit-auth-main">
+      <div className={["orbit-auth-card", "orbit-stagger", shake ? "orbit-shake" : "", success ? "orbit-card-out" : "", loading && !success ? "orbit-auth-busy" : ""].filter(Boolean).join(" ")}>
+      <div className="orbit-auth-mobilelogo" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 30 }}>
         <OrbitCatLogo size={46} animated />
         <span style={{ fontWeight: 800, fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>ORBIT</span>
       </div>
@@ -555,8 +598,17 @@ function AuthScreen({ onAuthed }) {
 
           <ErrorBanner message={error} />
 
-          <button type="submit" disabled={loading || (mode === "register" && !agreed)} style={{ ...primaryBtn, opacity: loading || (mode === "register" && !agreed) ? 0.6 : 1, marginTop: 6 }}>
-            {loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : (mode === "login" ? "Sign in" : mode === "register" ? "Create account" : "Send reset link")}
+          <button
+            type="submit"
+            disabled={loading || (mode === "register" && !agreed)}
+            className={loading && !success ? "orbit-btn-loading" : undefined}
+            style={{ ...primaryBtn, opacity: !loading && mode === "register" && !agreed ? 0.6 : 1, marginTop: 6, padding: "14px 18px" }}
+          >
+            {success ? (
+              <span className="orbit-pop" style={{ display: "flex", alignItems: "center", gap: 8 }}><Check size={17} /> {mode === "login" ? "Welcome back!" : "You're in!"}</span>
+            ) : loading ? (
+              <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> {mode === "login" ? "Signing in…" : mode === "register" ? "Creating account…" : "Sending…"}</>
+            ) : (mode === "login" ? "Sign in" : mode === "register" ? "Create account" : "Send reset link")}
           </button>
         </form>
       )}
@@ -585,6 +637,8 @@ function AuthScreen({ onAuthed }) {
       <div style={{ textAlign: "center", marginTop: 10, fontSize: 11, color: T.inkFaint }}>
         Connecting to <code>{api.base}</code>
       </div>
+      </div>
+      </main>
     </div>
   );
 }
@@ -1309,12 +1363,20 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
   );
 }
 
-function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority }) {
+function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onDelete }) {
   const [filter, setFilter] = useState("All");
   const [sort, setSort] = useState("Newest"); // "Newest" | "Priority"
   const [draft, setDraft] = useState("");
   const [draftPriority, setDraftPriority] = useState("Medium");
   const [openId, setOpenId] = useState(null); // task whose priority picker is showing
+  const [confirmId, setConfirmId] = useState(null); // task waiting for a second tap to delete
+
+  // An unconfirmed delete quietly resets after a few seconds.
+  useEffect(() => {
+    if (!confirmId) return undefined;
+    const id = setTimeout(() => setConfirmId(null), 3000);
+    return () => clearTimeout(id);
+  }, [confirmId]);
 
   const filtered = tasks.filter((t) => filter === "All" || (filter === "Completed" ? t.done : !t.done));
   const visible = sort === "Priority"
@@ -1373,6 +1435,17 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority }) {
                 style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
               >
                 <PriorityTag p={t.priority} />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirmId === t.id) { setConfirmId(null); onDelete(t); } else setConfirmId(t.id);
+                }}
+                aria-label={confirmId === t.id ? "Tap again to delete this task" : "Delete task"}
+                title={confirmId === t.id ? "Tap again to delete" : "Delete task"}
+                style={{ display: "flex", alignItems: "center", gap: 4, border: "none", cursor: "pointer", borderRadius: 9, padding: confirmId === t.id ? "5px 9px" : 6, background: confirmId === t.id ? T.danger : "transparent", color: confirmId === t.id ? "#fff" : T.inkFaint, fontSize: 11.5, fontWeight: 700 }}
+              >
+                <Trash2 size={15} />{confirmId === t.id && "Delete?"}
               </button>
             </div>
           ))}
@@ -1666,12 +1739,25 @@ function GroupScreen({ back, user, group, embedded = false }) {
   );
 }
 
-function InsightsScreen({ back, tasks, studySessions, onLogSession }) {
+const SUBJECT_COLORS = [T.primary, T.accent, T.teal, T.coral, T.primaryLight, "#7C6FD6"];
+
+function formatMinutes(m) {
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+}
+
+function InsightsScreen({ back, tasks, studySessions, onLogSession, onRenameSession, onDeleteSession }) {
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0); // seconds
   const [saving, setSaving] = useState(false);
+  const [title, setTitle] = useState("");
+  const [range, setRange] = useState("30d"); // "7d" | "30d" | "all"
+  const [showAll, setShowAll] = useState(false);
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [confirmId, setConfirmId] = useState(null);
   const startRef = useRef(null);
   const intervalRef = useRef(null);
+  const renamingRef = useRef(null); // guards against Enter + blur both saving
 
   useEffect(() => {
     if (running) {
@@ -1682,17 +1768,41 @@ function InsightsScreen({ back, tasks, studySessions, onLogSession }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running]);
 
+  useEffect(() => {
+    if (!confirmId) return undefined;
+    const id = setTimeout(() => setConfirmId(null), 3000);
+    return () => clearTimeout(id);
+  }, [confirmId]);
+
   async function stopAndLog() {
     setRunning(false);
     clearInterval(intervalRef.current);
     const minutes = Math.max(1, Math.round(elapsed / 60));
     setSaving(true);
     try {
-      await onLogSession(minutes);
+      await onLogSession(minutes, title.trim());
+      setTitle("");
     } finally {
       setElapsed(0);
       setSaving(false);
     }
+  }
+
+  function startRename(s) {
+    renamingRef.current = s.id;
+    setRenamingId(s.id);
+    setRenameDraft(s.title || "");
+  }
+  function commitRename(s) {
+    if (renamingRef.current !== s.id) return;
+    renamingRef.current = null;
+    setRenamingId(null);
+    const next = renameDraft.trim();
+    if (next !== (s.title || "")) onRenameSession(s.id, next);
+  }
+  function cancelRename() {
+    renamingRef.current = null;
+    setRenamingId(null);
   }
 
   const done = tasks.filter((t) => t.done).length;
@@ -1702,56 +1812,180 @@ function InsightsScreen({ back, tasks, studySessions, onLogSession }) {
   const last7 = Array.from({ length: 7 }, (_, i) => { const d = new Date(now); d.setDate(d.getDate() - (6 - i)); return d; });
   const minutesByDay = {};
   studySessions.forEach((s) => {
-    const k = dayKey(new Date(s.started_at));
+    const k = dayKey(parseServerDate(s.started_at));
     minutesByDay[k] = (minutesByDay[k] || 0) + s.minutes;
   });
   const weekData = last7.map((d) => ({ day: d.toLocaleDateString(undefined, { weekday: "short" })[0], minutes: minutesByDay[dayKey(d)] || 0 }));
   const maxMinutes = Math.max(1, ...weekData.map((d) => d.minutes));
   const totalMinutes = weekData.reduce((sum, d) => sum + d.minutes, 0);
-  const totalLabel = totalMinutes >= 60 ? `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m` : `${totalMinutes}m`;
+  const totalLabel = formatMinutes(totalMinutes);
 
   const timerLabel = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+
+  // --- where the time goes, grouped by session title (case-insensitive) ---
+  const cutoff = range === "all" ? 0 : Date.now() - (range === "7d" ? 7 : 30) * 86400000;
+  const totals = new Map();
+  studySessions.forEach((s) => {
+    if (parseServerDate(s.started_at).getTime() < cutoff) return;
+    const label = (s.title || "").trim();
+    const key = label ? label.toLowerCase() : "__untitled";
+    const cur = totals.get(key) || { key, label: label || "Untitled", minutes: 0, count: 0 };
+    cur.minutes += s.minutes;
+    cur.count += 1;
+    totals.set(key, cur);
+  });
+  const subjects = [...totals.values()].sort((x, y) => y.minutes - x.minutes);
+  const topSubjects = subjects.slice(0, 6);
+  const maxSubject = Math.max(1, ...topSubjects.map((s) => s.minutes));
+  const topNamed = subjects.find((s) => s.key !== "__untitled");
+  const colorFor = (key) => (key === "__untitled" ? T.inkFaint : SUBJECT_COLORS[Math.max(0, subjects.findIndex((s) => s.key === key)) % SUBJECT_COLORS.length]);
+  const knownTitles = [...new Set(studySessions.map((s) => (s.title || "").trim()).filter(Boolean))];
+
+  const visibleSessions = showAll ? studySessions : studySessions.slice(0, 8);
+
+  const chip = (active) => ({ border: `1px solid ${active ? T.ink : T.line}`, borderRadius: 999, padding: "4px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", background: active ? T.ink : T.panel, color: active ? "#fff" : T.inkSoft });
+  const colStyle = { display: "flex", flexDirection: "column", gap: 14, minWidth: 0 };
 
   return (
     <div>
       <TopBar title="Insights" onBack={back} />
-      <div className="orbit-stagger" style={screenBox}>
-        <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", gap: 10, padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study timer</div>
-          <div style={{ fontSize: 34, fontWeight: 800, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{timerLabel}</div>
-          {!running ? (
-            <button onClick={() => setRunning(true)} style={primaryBtn}>Start studying</button>
-          ) : (
-            <button onClick={stopAndLog} disabled={saving} style={{ ...primaryBtn, background: T.danger, opacity: saving ? 0.6 : 1 }}>
-              {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Stop & log session"}
-            </button>
-          )}
-        </div>
-
-        <div style={{ display: "flex", gap: 12 }}>
-          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", flex: 1, gap: 6, padding: "16px 10px" }}>
-            <div style={{ position: "relative" }}>
-              <ProgressRing pct={pct} />
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: T.ink }}>{pct}%</div>
-            </div>
-            <div style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>{done} of {tasks.length} tasks</div>
+      <div className="orbit-cols" style={screenBox}>
+        <div style={colStyle}>
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10, padding: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study timer</div>
+            <div style={{ fontSize: 36, fontWeight: 800, color: T.ink, fontVariantNumeric: "tabular-nums", letterSpacing: -1 }}>{timerLabel}</div>
+            <input
+              list="orbit-subjects"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={60}
+              placeholder="What are you studying? (e.g. Calculus)"
+              style={inputStyle}
+            />
+            <datalist id="orbit-subjects">{knownTitles.map((t) => <option key={t} value={t} />)}</datalist>
+            {!running ? (
+              <button onClick={() => setRunning(true)} style={primaryBtn}>Start studying</button>
+            ) : (
+              <button onClick={stopAndLog} disabled={saving} style={{ ...primaryBtn, background: T.danger, boxShadow: "none", opacity: saving ? 0.6 : 1 }}>
+                {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Stop & log session"}
+              </button>
+            )}
           </div>
-          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "flex-start", flex: 1, gap: 6, padding: "16px 14px", justifyContent: "center" }}>
-            <TrendingUp size={18} color={T.primary} />
-            <div style={{ fontSize: 20, fontWeight: 800, color: T.ink }}>{totalLabel}</div>
-            <div style={{ fontSize: 11.5, color: T.inkFaint, fontWeight: 700 }}>Last 7 days</div>
-          </div>
-        </div>
 
-        <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 14, padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study time this week</div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 100 }}>
-            {weekData.map((d, i) => (
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <div className="orbit-bar" style={{ width: "100%", borderRadius: 8, background: `linear-gradient(180deg, ${T.primaryLight}, ${T.primary})`, height: `${Math.max(4, (d.minutes / maxMinutes) * 80)}px`, animationDelay: `${i * 70}ms` }} />
-                <div style={{ fontSize: 10.5, color: T.inkFaint, fontWeight: 600 }}>{d.day}</div>
+          <div style={{ display: "flex", gap: 12 }}>
+            <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", flex: 1, gap: 6, padding: "16px 10px" }}>
+              <div style={{ position: "relative" }}>
+                <ProgressRing pct={pct} />
+                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: T.ink }}>{pct}%</div>
               </div>
-            ))}
+              <div style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>{done} of {tasks.length} tasks</div>
+            </div>
+            <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "flex-start", flex: 1, gap: 6, padding: "16px 14px", justifyContent: "center" }}>
+              <TrendingUp size={18} color={T.primary} />
+              <div style={{ fontSize: 20, fontWeight: 800, color: T.ink }}>{totalLabel}</div>
+              <div style={{ fontSize: 11.5, color: T.inkFaint, fontWeight: 700 }}>Last 7 days</div>
+            </div>
+          </div>
+
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 14, padding: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study time this week</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 100 }}>
+              {weekData.map((d, i) => (
+                <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                  <div className="orbit-bar" style={{ width: "100%", borderRadius: 8, background: `linear-gradient(180deg, ${T.primaryLight}, ${T.primary})`, height: `${Math.max(4, (d.minutes / maxMinutes) * 80)}px`, animationDelay: `${i * 70}ms` }} />
+                  <div style={{ fontSize: 10.5, color: T.inkFaint, fontWeight: 600 }}>{d.day}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={colStyle}>
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 14, padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Where your time goes</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[["7d", "7 days"], ["30d", "30 days"], ["all", "All time"]].map(([key, label]) => (
+                  <button key={key} onClick={() => setRange(key)} style={chip(range === key)}>{label}</button>
+                ))}
+              </div>
+            </div>
+            {topSubjects.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: T.inkFaint, lineHeight: 1.5 }}>
+                No study sessions in this period yet. Give your next session a title and your top subjects will show up here.
+              </div>
+            ) : (
+              <>
+                {topNamed && (
+                  <div style={{ fontSize: 13.5, color: T.ink, lineHeight: 1.5 }}>
+                    You study <strong style={{ color: T.primary }}>{topNamed.label}</strong> the most — {formatMinutes(topNamed.minutes)}.
+                  </div>
+                )}
+                {topSubjects.map((sub) => (
+                  <div key={sub.key}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5, marginBottom: 5 }}>
+                      <span style={{ fontWeight: 700, color: sub.key === "__untitled" ? T.inkFaint : T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub.label}</span>
+                      <span style={{ color: T.inkSoft, fontWeight: 600, flexShrink: 0 }}>{formatMinutes(sub.minutes)} · {sub.count} session{sub.count === 1 ? "" : "s"}</span>
+                    </div>
+                    <div style={{ height: 8, borderRadius: 999, background: T.primarySoft, overflow: "hidden" }}>
+                      <div className="orbit-hbar" style={{ height: "100%", width: `${Math.max(4, (sub.minutes / maxSubject) * 100)}%`, borderRadius: 999, background: colorFor(sub.key) }} />
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 4, padding: "16px 16px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study log</div>
+              <div style={{ fontSize: 11.5, color: T.inkFaint, fontWeight: 600 }}>{studySessions.length} session{studySessions.length === 1 ? "" : "s"}</div>
+            </div>
+            {studySessions.length === 0 && (
+              <div style={{ fontSize: 12.5, color: T.inkFaint, padding: "6px 0 10px", lineHeight: 1.5 }}>Nothing logged yet. Start the timer and your sessions will appear here — you can rename or remove any of them.</div>
+            )}
+            {visibleSessions.map((s, i) => {
+              const key = (s.title || "").trim() ? s.title.trim().toLowerCase() : "__untitled";
+              const color = colorFor(key);
+              const when = parseServerDate(s.started_at);
+              const confirming = confirmId === s.id;
+              return (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: i === 0 ? "none" : `1px solid ${T.line}` }}>
+                  <div style={{ ...iconTileStyle, width: 34, height: 34, background: `${color}1F`, color }}><BookOpen size={16} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {renamingId === s.id ? (
+                      <input
+                        autoFocus
+                        value={renameDraft}
+                        maxLength={60}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") commitRename(s); if (e.key === "Escape") cancelRename(); }}
+                        onBlur={() => commitRename(s)}
+                        placeholder="Session title"
+                        style={{ ...inputStyle, padding: "7px 10px", fontSize: 13.5 }}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 14, fontWeight: 700, color: s.title ? T.ink : T.inkFaint, fontStyle: s.title ? "normal" : "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title || "Untitled session"}</div>
+                    )}
+                    <div style={{ fontSize: 12, color: T.inkFaint }}>
+                      {formatMinutes(s.minutes)} · {isNaN(when) ? "" : `${when.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`}
+                    </div>
+                  </div>
+                  <button onClick={() => startRename(s)} aria-label="Rename session" title="Rename" style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 9, display: "flex" }}><Pencil size={14} color={T.inkFaint} /></button>
+                  <button
+                    onClick={() => { if (confirming) { setConfirmId(null); onDeleteSession(s.id); } else setConfirmId(s.id); }}
+                    aria-label={confirming ? "Tap again to delete this session" : "Delete session"}
+                    title={confirming ? "Tap again to delete" : "Delete session"}
+                    style={{ display: "flex", alignItems: "center", gap: 4, border: "none", cursor: "pointer", borderRadius: 9, padding: confirming ? "5px 9px" : 6, background: confirming ? T.danger : "transparent", color: confirming ? "#fff" : T.inkFaint, fontSize: 11.5, fontWeight: 700 }}
+                  >
+                    <Trash2 size={15} />{confirming && "Delete?"}
+                  </button>
+                </div>
+              );
+            })}
+            {studySessions.length > 8 && (
+              <button onClick={() => setShowAll((v) => !v)} style={{ ...secondaryBtn, marginTop: 6, padding: "9px 14px", fontSize: 13 }}>{showAll ? "Show less" : `Show all ${studySessions.length}`}</button>
+            )}
           </div>
         </div>
       </div>
@@ -1826,6 +2060,13 @@ const folderApi = {
   remove: (id) => accountRequest(`/folders/${id}`, { method: "DELETE" }),
   reorder: (ids) =>
     accountRequest("/folders/order", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }),
+};
+
+// Study session rename/delete (kept here so api.js doesn't need changes).
+const studyApi = {
+  rename: (id, title) =>
+    accountRequest(`/study-sessions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) }).then((r) => r.json()),
+  remove: (id) => accountRequest(`/study-sessions/${id}`, { method: "DELETE" }),
 };
 
 function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
@@ -2146,6 +2387,16 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     setTasks((prev) => [created, ...prev]);
   }
 
+  async function deleteTask(task) {
+    setTasks((prev) => prev.filter((t) => t.id !== task.id)); // optimistic
+    try {
+      await api.tasks.delete(task.id);
+    } catch (err) {
+      setTasks((prev) => [task, ...prev]);
+      setInviteNotice(err.message || "Couldn't delete that task.");
+    }
+  }
+
   async function setTaskPriority(task, priority) {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, priority } : t))); // optimistic
     try {
@@ -2172,9 +2423,25 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     setEvents((prev) => prev.filter((e) => e.id !== id));
   }
 
-  async function logStudySession(minutes) {
-    const created = await api.studySessions.create({ minutes });
+  async function logStudySession(minutes, title = "") {
+    const created = await api.studySessions.create({ minutes, title });
     setStudySessions((prev) => [created, ...prev]);
+  }
+
+  async function renameStudySession(id, title) {
+    const updated = await studyApi.rename(id, title);
+    setStudySessions((prev) => prev.map((s) => (s.id === id ? updated : s)));
+  }
+
+  async function deleteStudySession(id) {
+    const removed = studySessions.find((s) => s.id === id);
+    setStudySessions((prev) => prev.filter((s) => s.id !== id)); // optimistic
+    try {
+      await studyApi.remove(id);
+    } catch (err) {
+      if (removed) setStudySessions((prev) => [removed, ...prev].sort((x, y) => parseServerDate(y.started_at) - parseServerDate(x.started_at)));
+      setInviteNotice(err.message || "Couldn't delete that study session.");
+    }
   }
 
   async function createGroup(name) {
@@ -2209,7 +2476,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
       case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} onUpdate={updateFolder} onDelete={deleteFolder} />;
       case "capture": return <CaptureScreen back={() => setScreen("home")} onSave={saveItem} folders={folders} />;
       case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} />;
-      case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} onSetPriority={setTaskPriority} />;
+      case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} onSetPriority={setTaskPriority} onDelete={deleteTask} />;
       case "groupslist":
         return isDesktop
           ? <GroupsWorkspace groups={groups} activeGroup={activeGroup} user={user} go={go} onCreate={createGroup} onJoin={joinGroup} />
@@ -2219,7 +2486,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
         return activeGroup
           ? <GroupScreen back={() => setScreen("groupslist")} user={user} group={activeGroup} />
           : <CenterSpinner label="Loading group…" />;
-      case "insights": return <InsightsScreen back={() => setScreen("home")} tasks={tasks} studySessions={studySessions} onLogSession={logStudySession} />;
+      case "insights": return <InsightsScreen back={() => setScreen("home")} tasks={tasks} studySessions={studySessions} onLogSession={logStudySession} onRenameSession={renameStudySession} onDeleteSession={deleteStudySession} />;
       case "reminders": return <RemindersScreen back={() => setScreen("home")} reminders={reminders} onAdd={addReminder} />;
       case "profile": return <ProfileScreen back={() => setScreen("home")} user={user} onLogout={onLogout} onUserUpdate={onUserUpdate} />;
       default: return null;
@@ -2249,7 +2516,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
               <div onClick={() => setInviteNotice("")} style={{ fontSize: 12, fontWeight: 700, color: T.inkSoft, cursor: "pointer", marginTop: 4 }}>Dismiss</div>
             </div>
           )}
-          <div key={screen} className={["archive", "folder", "home", "todo", "reminders", "calendar", "groupslist", "group", "capture"].includes(screen) ? "orbit-page" : "orbit-page orbit-narrow"} >{renderScreen()}</div>
+          <div key={screen} className={["archive", "folder", "home", "todo", "reminders", "calendar", "groupslist", "group", "capture", "insights"].includes(screen) ? "orbit-page" : "orbit-page orbit-narrow"} >{renderScreen()}</div>
           <div className="orbit-bottomnav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 420, margin: "0 auto", background: "rgba(255,255,255,0.86)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", borderTop: `1px solid ${T.line}`, borderRadius: "20px 20px 0 0", boxShadow: "0 -8px 30px rgba(16,35,26,0.07)", padding: "10px 22px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             {MOBILE_NAV.map((n) => n.key === "capture" ? (
               <div key={n.key} className="orbit-fab" onClick={() => go(n.key)} style={{ width: 46, height: 46, borderRadius: 999, background: `linear-gradient(135deg, ${T.primaryLight}, ${T.primary})`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: `0 6px 18px ${T.primaryGlow}` }}>
@@ -2314,6 +2581,13 @@ function GlobalStyles() {
       @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.3); } 100% { transform: scale(1); } }
       @keyframes checkPop { 0% { transform: scale(.55); } 60% { transform: scale(1.22); } 100% { transform: scale(1); } }
       @keyframes growY { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+      @keyframes growX { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+      @keyframes progressSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(270%); } }
+      @keyframes shimmerBtn { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+      @keyframes shake { 10%, 90% { transform: translateX(-2px); } 20%, 80% { transform: translateX(4px); } 30%, 50%, 70% { transform: translateX(-7px); } 40%, 60% { transform: translateX(7px); } }
+      @keyframes cardOut { to { opacity: 0; transform: translateY(-14px) scale(.97); } }
+      @keyframes drift { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(34px, -26px) scale(1.1); } }
+      @keyframes twinkle { 0%, 100% { opacity: .18; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.25); } }
 
       /* page + content entrances */
       .orbit-page { animation: fadeIn .35s var(--ease) both; }
@@ -2341,6 +2615,27 @@ function GlobalStyles() {
       .orbit-pop-in { animation: popIn .3s var(--ease) both; }
       .orbit-msg { animation: fadeUp .3s var(--ease) both; }
       .orbit-bar { transform-origin: bottom; animation: growY .8s var(--ease) both; }
+      .orbit-hbar { transform-origin: left; animation: growX .9s var(--ease) both; }
+
+      /* sign-in page: full-tab split layout */
+      .orbit-auth-hero { display: none; }
+      .orbit-auth-main { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 28px 20px; }
+      .orbit-auth-card { width: 100%; max-width: 440px; background: ${T.panel}; border: 1px solid ${T.line}; border-radius: 24px; padding: 32px 26px; box-shadow: ${T.shadow}; animation: popIn .6s var(--ease) both; }
+      .orbit-auth-hero { position: relative; overflow: hidden; flex: 1.1; flex-direction: column; justify-content: center; padding: 64px; background: linear-gradient(155deg, #09241A 0%, ${T.sidebar} 48%, #0F3A29 100%); }
+      .orbit-orb { position: absolute; border-radius: 999px; filter: blur(70px); animation: drift 18s ease-in-out infinite; pointer-events: none; }
+      .orbit-star { position: absolute; border-radius: 999px; background: ${T.accent}; box-shadow: 0 0 12px ${T.accent}; animation: twinkle 3.4s ease-in-out infinite; pointer-events: none; }
+      @media (min-width: 900px) {
+        .orbit-auth-hero { display: flex; }
+        .orbit-auth-main { flex: 1; padding: 40px; }
+        .orbit-auth-card { padding: 44px 40px; box-shadow: 0 28px 70px rgba(16,35,26,.12); }
+        .orbit-auth-mobilelogo { display: none !important; }
+      }
+      .orbit-topbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 200; overflow: hidden; background: rgba(10,132,84,.12); }
+      .orbit-topbar span { display: block; height: 100%; width: 38%; border-radius: 3px; background: linear-gradient(90deg, transparent, ${T.primaryBright}, ${T.primary}); animation: progressSlide 1.15s var(--ease) infinite; }
+      .orbit-btn-loading { background: linear-gradient(110deg, ${T.primary} 25%, ${T.primaryBright} 50%, ${T.primary} 75%) 0 0 / 220% 100% !important; animation: shimmerBtn 1.3s linear infinite; cursor: progress !important; }
+      .orbit-auth-busy form { pointer-events: none; }
+      .orbit-shake { animation: shake .55s cubic-bezier(.36, .07, .19, .97) both; }
+      .orbit-card-out { animation: cardOut .5s var(--ease) .3s both; }
 
       /* interactive surfaces */
       .orbit-card { transition: transform .28s var(--ease), box-shadow .28s var(--ease), border-color .2s ease; }
