@@ -109,12 +109,8 @@ async def security_headers(request: Request, call_next):
     return response
 
 # (name, color, icon key) — seeded in this order for every new account.
+# Only "Personal" to start; everything else is created by the person themselves.
 DEFAULT_FOLDERS = [
-    ("Biology", "#00674F", "leaf"),
-    ("Math 21", "#009B77", "sigma"),
-    ("Physics", "#046307", "atom"),
-    ("Group Project", "#D4AF37", "users"),
-    ("Workshops", "#7FE0A8", "wrench"),
     ("Personal", "#2F9159", "user"),
 ]
 

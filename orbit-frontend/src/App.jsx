@@ -218,8 +218,38 @@ const secondaryBtn = { display: "flex", alignItems: "center", justifyContent: "c
 const inputStyle = { width: "100%", border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 14px", fontSize: 14, color: T.ink, background: T.panel, boxSizing: "border-box" };
 const selectStyle = { ...inputStyle, appearance: "none", cursor: "pointer" };
 
+const PRIORITY_LEVELS = ["High", "Medium", "Low"]; // most urgent first
+const PRIORITY_COLORS = { High: T.danger, Medium: "#D68A0C", Low: "#0E9F6E" };
+
+// Three-way picker used when adding a task and when changing one.
+function PriorityChips({ value, onChange, size = "md" }) {
+  const small = size === "sm";
+  return (
+    <div role="radiogroup" aria-label="Priority" style={{ display: "flex", gap: 6 }}>
+      {PRIORITY_LEVELS.map((level) => {
+        const c = PRIORITY_COLORS[level];
+        const active = value === level;
+        return (
+          <button
+            key={level}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(level)}
+            style={{
+              cursor: "pointer", fontWeight: 700, borderRadius: 999,
+              fontSize: small ? 11.5 : 12.5, padding: small ? "4px 10px" : "7px 14px",
+              color: active ? "#fff" : c, background: active ? c : `${c}15`, border: `1px solid ${active ? c : `${c}55`}`,
+            }}
+          >{level}</button>
+        );
+      })}
+    </div>
+  );
+}
+
 function PriorityTag({ p }) {
-  const colors = { High: T.danger, Medium: "#D68A0C", Low: "#0E9F6E" };
+  const colors = PRIORITY_COLORS;
   const c = colors[p] || T.inkFaint;
   return <span style={{ fontSize: 11, fontWeight: 700, color: c, background: `${c}15`, padding: "3px 8px", borderRadius: 8 }}>{p}</span>;
 }
@@ -1245,40 +1275,83 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
   );
 }
 
-function TodoScreen({ tasks, back, onToggle, onAdd }) {
+function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority }) {
   const [filter, setFilter] = useState("All");
+  const [sort, setSort] = useState("Newest"); // "Newest" | "Priority"
   const [draft, setDraft] = useState("");
+  const [draftPriority, setDraftPriority] = useState("Medium");
+  const [openId, setOpenId] = useState(null); // task whose priority picker is showing
+
   const filtered = tasks.filter((t) => filter === "All" || (filter === "Completed" ? t.done : !t.done));
+  const visible = sort === "Priority"
+    ? // stable sort: finished tasks sink, then High → Medium → Low; ties keep their current order
+      [...filtered].sort((x, y) => Number(x.done) - Number(y.done) || PRIORITY_LEVELS.indexOf(x.priority) - PRIORITY_LEVELS.indexOf(y.priority))
+    : filtered;
 
   async function addTask() {
     if (!draft.trim()) return;
-    await onAdd(draft.trim());
+    await onAdd(draft.trim(), draftPriority);
     setDraft("");
   }
+
+  const pill = (active) => ({ border: `1px solid ${active ? T.ink : T.line}`, borderRadius: 999, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", background: active ? T.ink : T.panel, color: active ? "#fff" : T.inkSoft });
 
   return (
     <div>
       <TopBar title="My Tasks" onBack={back} />
       <div style={screenBox}>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {["All", "Active", "Completed"].map((f) => (
-            <button key={f} onClick={() => setFilter(f)} style={{ border: `1px solid ${filter === f ? T.ink : T.line}`, borderRadius: 999, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", background: filter === f ? T.ink : T.panel, color: filter === f ? "#fff" : T.inkSoft }}>{f}</button>
+            <button key={f} onClick={() => setFilter(f)} style={pill(filter === f)}>{f}</button>
+          ))}
+          <span style={{ flex: 1 }} />
+          <button onClick={() => setSort((s) => (s === "Priority" ? "Newest" : "Priority"))} style={pill(sort === "Priority")} title="Show the most urgent tasks first">
+            {sort === "Priority" ? "Sorted by priority" : "Sort by priority"}
+          </button>
+        </div>
+        {tasks.length === 0 && (
+          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
+            <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><CheckSquare size={18} /></div>
+            <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>No tasks yet</div>
+            <div style={{ fontSize: 12.5, color: T.inkFaint }}>Add your first one below and give it a priority.</div>
+          </div>
+        )}
+        <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {visible.map((t) => (
+            <div key={t.id} style={rowCardStyle} onClick={() => onToggle(t)}>
+              <div style={{ cursor: "pointer" }}>{t.done ? <CheckSquare size={19} color={T.primary} /> : <Square size={19} color={T.inkFaint} />}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: t.done ? T.inkFaint : T.ink, textDecoration: t.done ? "line-through" : "none", overflowWrap: "anywhere" }}>{t.text}</div>
+                {openId === t.id && (
+                  <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+                    <PriorityChips
+                      size="sm"
+                      value={t.priority}
+                      onChange={(level) => { setOpenId(null); if (level !== t.priority) onSetPriority(t, level); }}
+                    />
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); setOpenId((id) => (id === t.id ? null : t.id)); }}
+                aria-label={`Priority ${t.priority} — tap to change`}
+                title="Change priority"
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+              >
+                <PriorityTag p={t.priority} />
+              </button>
+            </div>
           ))}
         </div>
-        <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {filtered.map((t) => (
-          <div key={t.id} style={rowCardStyle} onClick={() => onToggle(t)}>
-            <div style={{ cursor: "pointer" }}>{t.done ? <CheckSquare size={19} color={T.primary} /> : <Square size={19} color={T.inkFaint} />}</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: t.done ? T.inkFaint : T.ink, textDecoration: t.done ? "line-through" : "none" }}>{t.text}</div>
-            </div>
-            <PriorityTag p={t.priority} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTask()} placeholder="Add a task…" style={inputStyle} />
+            <button onClick={addTask} aria-label="Add task" style={{ ...primaryBtn, padding: "0 18px" }}><Plus size={16} /></button>
           </div>
-        ))}
-        </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-          <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTask()} placeholder="Add a task…" style={inputStyle} />
-          <button onClick={addTask} style={{ ...primaryBtn, padding: "0 18px" }}><Plus size={16} /></button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>Priority</span>
+            <PriorityChips value={draftPriority} onChange={setDraftPriority} />
+          </div>
         </div>
       </div>
     </div>
@@ -2032,9 +2105,20 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
   }
 
-  async function addTask(text) {
-    const created = await api.tasks.create({ text, priority: "Medium", due_date: "" });
+  async function addTask(text, priority = "Medium") {
+    const created = await api.tasks.create({ text, priority, due_date: "" });
     setTasks((prev) => [created, ...prev]);
+  }
+
+  async function setTaskPriority(task, priority) {
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, priority } : t))); // optimistic
+    try {
+      const updated = await api.tasks.update(task.id, { priority });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    } catch (err) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, priority: task.priority } : t)));
+      setInviteNotice(err.message || "Couldn't change that task's priority.");
+    }
   }
 
   async function addReminder(title) {
@@ -2089,7 +2173,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
       case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} onUpdate={updateFolder} onDelete={deleteFolder} />;
       case "capture": return <CaptureScreen back={() => setScreen("home")} onSave={saveItem} folders={folders} />;
       case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} />;
-      case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} />;
+      case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} onSetPriority={setTaskPriority} />;
       case "groupslist":
         return isDesktop
           ? <GroupsWorkspace groups={groups} activeGroup={activeGroup} user={user} go={go} onCreate={createGroup} onJoin={joinGroup} />

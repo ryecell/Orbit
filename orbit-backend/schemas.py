@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 import re
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -196,15 +196,18 @@ class FolderOut(BaseModel):
 
 # ---------- Tasks ----------
 
+Priority = Literal["Low", "Medium", "High"]
+
+
 class TaskCreate(BaseModel):
     text: str
-    priority: str = "Medium"
+    priority: Priority = "Medium"
     due_date: str = ""
 
 
 class TaskUpdate(BaseModel):
     text: Optional[str] = None
-    priority: Optional[str] = None
+    priority: Optional[Priority] = None
     done: Optional[bool] = None
     due_date: Optional[str] = None
 
