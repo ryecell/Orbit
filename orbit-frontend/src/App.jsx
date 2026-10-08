@@ -13,19 +13,27 @@ import { api } from "./api.js";
 /* ---------------------------------- THEME ---------------------------------- */
 
 const T = {
-  bg: "#FFFFFF",            // white page background
-  panel: "#F6FBF8",         // faint mint-white for cards — just enough to separate from bg
-  ink: "#12241C",           // deep green-black text (not pure black — keeps the green identity)
-  inkSoft: "#5C7568",       // muted green-gray secondary text
-  inkFaint: "#9BB0A3",      // faint green-gray for placeholders
-  line: "#E1ECE5",          // soft green-tinted border
-  primary: "#50C878",       // emerald — buttons, active states, key accents
-  primaryDark: "#2F9159",
-  primarySoft: "rgba(80,200,120,0.14)",
-  primaryGlow: "rgba(80,200,120,0.38)",  // for soft glow/fade effects around key elements
-  sidebar: "#081C13",       // kept dark — a "night sky" strip against the white content
-  sidebarSoft: "#12291B",
-  danger: "#E2456B",        // kept distinct from the palette — errors should still read as errors
+  bg: "#F8FBF9",             // near-white with the faintest mint cast
+  panel: "#FFFFFF",          // cards are clean white; depth comes from soft shadows, not tints
+  ink: "#10231A",            // deep green-black text
+  inkSoft: "#566B60",
+  inkFaint: "#93A59B",
+  line: "#E4EDE8",
+  primary: "#0A8454",        // emerald — buttons, active states (passes contrast on white)
+  primaryLight: "#12A66B",   // brighter end of button gradients
+  primaryDark: "#066B43",
+  primaryBright: "#3DDC97",  // luminous mint — glows and accents on dark surfaces
+  primarySoft: "rgba(10,132,84,0.09)",
+  primaryGlow: "rgba(10,132,84,0.28)",
+  accent: "#D9A441",         // warm gold — complements green (the moodboard's flecks)
+  accentSoft: "rgba(217,164,65,0.16)",
+  teal: "#0E8F9A",           // cool counterpoint for variety
+  coral: "#F0705A",          // sparing warm highlight
+  sidebar: "#0C2A1F",        // deep forest
+  sidebarSoft: "#15382A",
+  danger: "#D9455F",
+  shadow: "0 1px 2px rgba(16,35,26,0.04), 0 4px 14px rgba(16,35,26,0.06)",
+  shadowLg: "0 18px 50px rgba(16,35,26,0.22)",
 };
 
 // A faint tileable sparkle texture — gold and spring-green flecks, visible
@@ -34,15 +42,10 @@ const T = {
 // echoes the gold-flecked moodboard without needing an image asset.
 const STARFIELD_BG = {
   backgroundImage: `
-    radial-gradient(1.6px 1.6px at 20px 30px, rgba(212,175,55,0.5), transparent),
-    radial-gradient(1.2px 1.2px at 70px 90px, rgba(212,175,55,0.32), transparent),
-    radial-gradient(1.6px 1.6px at 140px 45px, rgba(212,175,55,0.38), transparent),
-    radial-gradient(1.2px 1.2px at 100px 130px, rgba(80,200,120,0.28), transparent),
-    radial-gradient(1.6px 1.6px at 170px 100px, rgba(212,175,55,0.3), transparent),
-    radial-gradient(1.2px 1.2px at 40px 160px, rgba(80,200,120,0.22), transparent)
+    radial-gradient(900px 420px at 0% -8%, rgba(61,220,151,0.13), transparent 62%),
+    radial-gradient(700px 380px at 100% 0%, rgba(217,164,65,0.09), transparent 58%)
   `,
-  backgroundRepeat: "repeat",
-  backgroundSize: "200px 200px",
+  backgroundRepeat: "no-repeat",
 };
 
 // True on desktop-width windows. Drives layouts that need different structure
@@ -60,9 +63,9 @@ function useIsDesktop(breakpoint = 860) {
   return matches;
 }
 
-function OrbitCatLogo({ size = 28, glow = true }) {
+function OrbitCatLogo({ size = 28, glow = true, animated = false }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" style={glow ? { filter: "drop-shadow(0 0 10px rgba(80,200,120,0.45))" } : undefined}>
+    <svg className={animated ? "orbit-float" : undefined} width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" style={glow ? { filter: "drop-shadow(0 0 10px rgba(61,220,151,0.5))" } : undefined}>
       <defs>
         <radialGradient id="orbitCatDome" cx="35%" cy="30%" r="75%">
           <stop offset="0%" stopColor="#EAFBF1" />
@@ -108,8 +111,8 @@ const FOLDER_ICONS = {
   music: Music, heart: Heart, briefcase: Briefcase,
 };
 const FOLDER_COLORS = [
-  "#00674F", "#009B77", "#2F9159", "#046307", "#D4AF37", "#D68A0C",
-  "#E2456B", "#A855F7", "#5B3FE0", "#0891B2", "#7FE0A8", "#64748B",
+  "#0A8454", "#12A66B", "#2F9159", "#3DDC97", "#0E8F9A", "#2D7FA8",
+  "#D9A441", "#E08A2E", "#F0705A", "#D9455F", "#7C6FD6", "#64748B",
 ];
 
 // How a folder looks. Falls back to the old name-based lookup for any folder
@@ -121,7 +124,7 @@ function folderMeta(folder) {
     color: (folder && folder.color) || (legacy && legacy.color) || T.primary,
   };
 }
-const EVENT_COLORS = [T.primary, "#D4AF37", "#009B77", "#046307", "#00674F", "#7FE0A8"];
+const EVENT_COLORS = [T.primary, T.accent, T.teal, T.primaryLight, T.coral, T.primaryBright];
 
 /* ------------------------------- UTILITIES ---------------------------------- */
 
@@ -156,11 +159,16 @@ function matchFolder(name, folderNames) {
 function ProgressRing({ pct, size = 84, stroke = 9, color = T.primary }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
+  const [shown, setShown] = useState(0); // starts empty, then fills — the transition does the animating
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShown(pct));
+    return () => cancelAnimationFrame(id);
+  }, [pct]);
   return (
     <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
       <circle cx={size / 2} cy={size / 2} r={r} stroke={T.line} strokeWidth={stroke} fill="none" />
       <circle cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none"
-        strokeDasharray={c} strokeDashoffset={c - (pct / 100) * c} strokeLinecap="round" />
+        strokeDasharray={c} strokeDashoffset={c - (shown / 100) * c} strokeLinecap="round" style={{ transition: "stroke-dashoffset 1.1s cubic-bezier(.22,1,.36,1)" }} />
     </svg>
   );
 }
@@ -170,7 +178,7 @@ function Chip({ children, onRemove, color }) {
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 999,
       fontSize: 12.5, fontWeight: 600, background: color ? `${color}1A` : T.primarySoft,
-      color: color || T.primary, border: `1px solid ${color ? color + "33" : "#DCD3F8"}`,
+      color: color || T.primary, border: `1px solid ${color ? color + "33" : "rgba(10,132,84,0.22)"}`,
     }}>
       {children}
       {onRemove && <X size={12} style={{ cursor: "pointer" }} onClick={onRemove} />}
@@ -183,7 +191,7 @@ function TopBar({ title, onBack, right }) {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {onBack && <button onClick={onBack} style={iconBtnStyle}><ArrowLeft size={18} color={T.ink} /></button>}
-        <h1 style={{ fontSize: 19, fontWeight: 800, color: T.ink, margin: 0, letterSpacing: -0.3 }}>{title}</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: T.ink, margin: 0, letterSpacing: -0.5 }}>{title}</h1>
       </div>
       <div style={{ display: "flex", gap: 8 }}>{right}</div>
     </div>
@@ -193,7 +201,7 @@ function TopBar({ title, onBack, right }) {
 function ErrorBanner({ message }) {
   if (!message) return null;
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#FCEAEE", border: "1px solid #F3C6D1", borderRadius: 12, padding: 12, fontSize: 12.5, color: "#A5223F" }}>
+    <div className="orbit-pop-in" style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#FCEAEE", border: "1px solid #F3C6D1", borderRadius: 12, padding: 12, fontSize: 12.5, color: "#A5223F" }}>
       <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
       {message}
     </div>
@@ -209,17 +217,17 @@ function CenterSpinner({ label }) {
   );
 }
 
-const iconBtnStyle = { width: 36, height: 36, borderRadius: 12, border: `1px solid ${T.line}`, background: T.panel, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
+const iconBtnStyle = { width: 38, height: 38, borderRadius: 12, border: `1px solid ${T.line}`, background: T.panel, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
 const screenBox = { padding: "0 20px 100px", display: "flex", flexDirection: "column", gap: 14 };
-const rowCardStyle = { display: "flex", alignItems: "center", gap: 12, background: `linear-gradient(180deg, ${T.panel}, #EFF7F1)`, border: `1px solid ${T.line}`, borderRadius: 14, padding: "13px 14px" };
+const rowCardStyle = { display: "flex", alignItems: "center", gap: 12, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 16, padding: "14px 16px", boxShadow: T.shadow };
 const iconTileStyle = { width: 38, height: 38, borderRadius: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
-const primaryBtn = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: `linear-gradient(135deg, #6FDA9C, ${T.primary})`, color: "#fff", border: "none", borderRadius: 13, padding: "13px 16px", fontWeight: 700, fontSize: 14.5, cursor: "pointer", boxShadow: `0 4px 16px ${T.primaryGlow}` };
+const primaryBtn = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: `linear-gradient(135deg, ${T.primaryLight}, ${T.primary})`, color: "#fff", border: "none", borderRadius: 14, padding: "13px 18px", fontWeight: 700, fontSize: 14.5, cursor: "pointer", boxShadow: `0 6px 18px ${T.primaryGlow}` };
 const secondaryBtn = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: T.panel, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 13, padding: "13px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer" };
-const inputStyle = { width: "100%", border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 14px", fontSize: 14, color: T.ink, background: T.panel, boxSizing: "border-box" };
+const inputStyle = { width: "100%", border: `1px solid ${T.line}`, borderRadius: 13, padding: "13px 15px", fontSize: 14, color: T.ink, background: T.panel, boxSizing: "border-box" };
 const selectStyle = { ...inputStyle, appearance: "none", cursor: "pointer" };
 
 const PRIORITY_LEVELS = ["High", "Medium", "Low"]; // most urgent first
-const PRIORITY_COLORS = { High: T.danger, Medium: "#D68A0C", Low: "#0E9F6E" };
+const PRIORITY_COLORS = { High: T.danger, Medium: "#B8760F", Low: T.primary };
 
 // Three-way picker used when adding a task and when changing one.
 function PriorityChips({ value, onChange, size = "md" }) {
@@ -256,10 +264,10 @@ function PriorityTag({ p }) {
 function FieldLabel({ children, icon: Icon }) {
   return <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, color: T.inkSoft, marginBottom: 8 }}>{Icon && <Icon size={13} />}{children}</div>;
 }
-function QuickAction({ icon: Icon, label, onClick }) {
+function QuickAction({ icon: Icon, label, onClick, tint = T.primary }) {
   return (
-    <div onClick={onClick} style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 7, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 0" }}>
-      <div style={{ width: 38, height: 38, borderRadius: 12, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon size={18} color={T.primary} /></div>
+    <div className="orbit-card" onClick={onClick} style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 16, padding: "16px 0", boxShadow: T.shadow }}>
+      <div style={{ width: 42, height: 42, borderRadius: 13, background: `${tint}1F`, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon size={19} color={tint} /></div>
       <span style={{ fontSize: 11.5, fontWeight: 600, color: T.inkSoft }}>{label}</span>
     </div>
   );
@@ -380,15 +388,39 @@ function renderLegalText(text) {
 
 function LegalModal({ type, onClose }) {
   const doc = LEGAL_CONTENT[type];
+
+  // Esc closes it, and the page behind doesn't scroll while it's open.
+  useEffect(() => {
+    if (!doc) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [doc, onClose]);
+
   if (!doc) return null;
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(8,28,19,0.6)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 420, maxHeight: "80vh", display: "flex", flexDirection: "column", ...STARFIELD_BG }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px 12px", borderBottom: `1px solid ${T.line}` }}>
-          <span style={{ fontWeight: 800, fontSize: 16, color: T.ink }}>{doc.title}</span>
-          <button onClick={onClose} style={iconBtnStyle}><X size={16} color={T.ink} /></button>
+    <div className="orbit-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(10,30,22,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div
+        className="orbit-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={doc.title}
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 22, width: "100%", maxWidth: 520, maxHeight: "min(68vh, 540px)", display: "flex", flexDirection: "column", boxShadow: T.shadowLg, overflow: "hidden" }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px 14px", borderBottom: `1px solid ${T.line}`, flexShrink: 0 }}>
+          <span style={{ fontWeight: 800, fontSize: 17, color: T.ink, letterSpacing: -0.3 }}>{doc.title}</span>
+          <button onClick={onClose} style={iconBtnStyle} aria-label="Close"><X size={16} color={T.ink} /></button>
         </div>
-        <div style={{ padding: "12px 20px 28px", overflowY: "auto" }}>{renderLegalText(doc.body)}</div>
+        <div style={{ padding: "6px 20px 18px", overflowY: "auto", flex: 1, minHeight: 0 }}>{renderLegalText(doc.body)}</div>
+        <div style={{ padding: "12px 20px 16px", borderTop: `1px solid ${T.line}`, flexShrink: 0 }}>
+          <button onClick={onClose} style={{ ...primaryBtn, width: "100%", boxSizing: "border-box" }}>Close</button>
+        </div>
       </div>
     </div>
   );
@@ -446,10 +478,10 @@ function AuthScreen({ onAuthed }) {
   }
 
   return (
-    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
+    <div className="orbit-stagger" style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
       {legalModal && <LegalModal type={legalModal} onClose={() => setLegalModal(null)} />}
       <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 30 }}>
-        <OrbitCatLogo size={46} />
+        <OrbitCatLogo size={46} animated />
         <span style={{ fontWeight: 800, fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>ORBIT</span>
       </div>
 
@@ -462,7 +494,7 @@ function AuthScreen({ onAuthed }) {
 
       {mode === "forgot" && forgotSent ? (
         <div style={{ textAlign: "center" }}>
-          <div style={{ background: T.primarySoft, border: `1px solid #DCD3F8`, borderRadius: 14, padding: "16px 18px", fontSize: 13.5, color: T.ink, lineHeight: 1.6 }}>
+          <div style={{ background: T.primarySoft, border: `1px solid rgba(10,132,84,0.2)`, borderRadius: 14, padding: "16px 18px", fontSize: 13.5, color: T.ink, lineHeight: 1.6 }}>
             If <strong>{username}</strong> has an email on file, a reset link is on its way there.
           </div>
           <span onClick={() => switchMode("login")} style={{ display: "inline-block", marginTop: 18, color: T.primary, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
@@ -583,9 +615,9 @@ function ResetPasswordScreen({ token, onDone }) {
   }
 
   return (
-    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
+    <div className="orbit-stagger" style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 30 }}>
-        <OrbitCatLogo size={46} />
+        <OrbitCatLogo size={46} animated />
         <span style={{ fontWeight: 800, fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>ORBIT</span>
       </div>
 
@@ -670,7 +702,7 @@ function VerifyPendingScreen({ user, onVerified, onLogout }) {
   }
 
   return (
-    <div style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", textAlign: "center", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
+    <div className="orbit-stagger" style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", textAlign: "center", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
       <div style={{ width: 64, height: 64, borderRadius: 18, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 22 }}>
         <Mail size={28} color={T.primary} />
       </div>
@@ -717,7 +749,7 @@ function HomeScreen({ folderList, tasks, go, user }) {
     <div>
       <div style={{ padding: "18px 20px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: T.ink, letterSpacing: -0.4 }}>Good morning, {(user.name || user.username).split(" ")[0]} 👋</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: T.ink, letterSpacing: -0.5 }}>{(() => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; })()}, {(user.name || user.username).split(" ")[0]} 👋</div>
           <div style={{ color: T.inkSoft, fontSize: 14, marginTop: 2 }}>Stay productive today.</div>
         </div>
         <button onClick={() => go("reminders")} style={{ ...iconBtnStyle, position: "relative" }}>
@@ -735,14 +767,14 @@ function HomeScreen({ folderList, tasks, go, user }) {
       <div style={{ padding: "20px 20px 0" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginBottom: 10 }}>Quick actions</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-          <QuickAction icon={Camera} label="Camera" onClick={() => go("capture")} />
-          <QuickAction icon={ListTodo} label="To-Do" onClick={() => go("todo")} />
-          <QuickAction icon={CalendarIcon} label="Calendar" onClick={() => go("calendar")} />
-          <QuickAction icon={BarChart3} label="Insights" onClick={() => go("insights")} />
+          <QuickAction icon={Camera} label="Camera" tint={T.primary} onClick={() => go("capture")} />
+          <QuickAction icon={ListTodo} label="To-Do" tint={T.accent} onClick={() => go("todo")} />
+          <QuickAction icon={CalendarIcon} label="Calendar" tint={T.teal} onClick={() => go("calendar")} />
+          <QuickAction icon={BarChart3} label="Insights" tint={T.coral} onClick={() => go("insights")} />
         </div>
       </div>
 
-      <div className="orbit-cols" style={screenBox}>
+      <div className="orbit-cols orbit-stagger" style={screenBox}>
        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Recent folders</div>
@@ -753,7 +785,7 @@ function HomeScreen({ folderList, tasks, go, user }) {
           const meta = folderMeta(f);
           const Icon = meta.icon;
           return (
-            <div key={f.id} onClick={() => go("folder", f.name)} style={rowCardStyle}>
+            <div key={f.id} onClick={() => go("folder", f.name)} className="orbit-card" style={rowCardStyle}>
               <div style={{ ...iconTileStyle, background: `${meta.color}1A`, color: meta.color }}><Icon size={18} /></div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>{f.name}</div>
@@ -771,7 +803,7 @@ function HomeScreen({ folderList, tasks, go, user }) {
         </div>
         {tasks.length === 0 && <div style={{ fontSize: 13, color: T.inkFaint }}>No tasks yet.</div>}
         {tasks.slice(0, 2).map((t) => (
-          <div key={t.id} style={rowCardStyle}>
+          <div key={t.id} className="orbit-card" style={rowCardStyle}>
             {t.done ? <CheckSquare size={19} color={T.primary} /> : <Square size={19} color={T.inkFaint} />}
             <div style={{ flex: 1, fontSize: 14, color: t.done ? T.inkFaint : T.ink, textDecoration: t.done ? "line-through" : "none" }}>{t.text}</div>
             <PriorityTag p={t.priority} />
@@ -826,12 +858,14 @@ function FolderEditorModal({ folder, onClose, onSave, onDelete }) {
 
   return (
     <div
+      className="orbit-overlay"
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(8,28,19,0.6)", zIndex: 100, display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", padding: isDesktop ? 24 : 0 }}
+      style={{ position: "fixed", inset: 0, background: "rgba(10,30,22,0.5)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", padding: isDesktop ? 24 : 0 }}
     >
       <div
+        className={isDesktop ? "orbit-dialog" : "orbit-dialog orbit-sheet"}
         onClick={(e) => e.stopPropagation()}
-        style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: isDesktop ? 20 : "20px 20px 0 0", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", ...STARFIELD_BG }}
+        style={{ background: T.panel, border: `1px solid ${T.line}`, boxShadow: T.shadowLg, borderRadius: isDesktop ? 22 : "22px 22px 0 0", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", ...STARFIELD_BG }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px 12px", borderBottom: `1px solid ${T.line}` }}>
           <span style={{ fontWeight: 800, fontSize: 16, color: T.ink }}>{editing ? "Edit folder" : "New folder"}</span>
@@ -839,7 +873,7 @@ function FolderEditorModal({ folder, onClose, onSave, onDelete }) {
         </div>
 
         <div style={{ padding: "16px 20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ ...rowCardStyle, gap: 12 }}>
+          <div className="orbit-card" style={{ ...rowCardStyle, gap: 12 }}>
             <div style={{ ...iconTileStyle, background: `${color}1A`, color }}><PreviewIcon size={18} /></div>
             <div style={{ fontWeight: 700, fontSize: 14.5, color: name.trim() ? T.ink : T.inkFaint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name.trim() || "Folder name"}</div>
           </div>
@@ -877,7 +911,7 @@ function FolderEditorModal({ folder, onClose, onSave, onDelete }) {
 
           {editing && onDelete && (
             confirmDelete ? (
-              <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10, border: `1px solid ${T.danger}` }}>
+              <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10, border: `1px solid ${T.danger}` }}>
                 <div style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>
                   Delete <strong>{folder.name}</strong>{itemCount > 0 ? <> and its {itemCount} item{itemCount === 1 ? "" : "s"}</> : null}? This can't be undone.
                 </div>
@@ -922,9 +956,9 @@ function ArchiveScreen({ folderList, go, onCreate, onUpdate, onDelete, onMove })
           Tap a folder to edit it, or use the arrows to change the order.
         </div>
       )}
-      <div className="orbit-grid" style={{ ...screenBox, paddingBottom: 14 }}>
+      <div className="orbit-grid orbit-stagger" style={{ ...screenBox, paddingBottom: 14 }}>
         {folderList.length === 0 && (
-          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
             <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><FolderOpen size={18} /></div>
             <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>No folders yet</div>
             <div style={{ fontSize: 12.5, color: T.inkFaint }}>Create a folder for each class or project to keep your notes sorted.</div>
@@ -934,7 +968,7 @@ function ArchiveScreen({ folderList, go, onCreate, onUpdate, onDelete, onMove })
           const meta = folderMeta(folder);
           const Icon = meta.icon;
           return (
-            <div key={folder.id} onClick={() => (customizing ? setModal({ folder }) : go("folder", folder.name))} style={{ ...rowCardStyle, cursor: "pointer" }}>
+            <div key={folder.id} onClick={() => (customizing ? setModal({ folder }) : go("folder", folder.name))} className="orbit-card" style={{ ...rowCardStyle, cursor: "pointer" }}>
               <div style={{ ...iconTileStyle, background: `${meta.color}1A`, color: meta.color }}><Icon size={18} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{folder.name}</div>
@@ -980,7 +1014,7 @@ function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, on
         onBack={back}
         right={folder && <button onClick={() => setEditing(true)} aria-label="Edit folder" title="Edit folder" style={iconBtnStyle}><Pencil size={15} color={T.ink} /></button>}
       />
-      <div style={screenBox}>
+      <div className="orbit-stagger" style={screenBox}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: -4 }}>
           <div style={{ ...iconTileStyle, background: `${meta.color}1A`, color: meta.color }}><Icon size={18} /></div>
           <div style={{ fontSize: 13, color: T.inkSoft }}>{items.length} items in this folder</div>
@@ -988,7 +1022,7 @@ function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, on
         {items.length === 0 && <div style={{ textAlign: "center", padding: "40px 10px", color: T.inkFaint, fontSize: 13.5 }}>Nothing here yet. Capture a photo or note to add your first item.</div>}
         <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {items.map((it) => (
-          <div key={it.id} style={{ ...rowCardStyle, alignItems: "flex-start", flexDirection: "column", gap: 8 }}>
+          <div key={it.id} className="orbit-card" style={{ ...rowCardStyle, alignItems: "flex-start", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
               <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>{it.title}</div>
               <X size={15} color={T.inkFaint} style={{ cursor: "pointer" }} onClick={() => onDeleteItem(it.id)} />
@@ -1073,7 +1107,7 @@ function CaptureScreen({ back, onSave, folders }) {
   return (
     <div>
       <TopBar title="Add to Archive" onBack={back} />
-      <div style={screenBox}>
+      <div className="orbit-stagger" style={screenBox}>
         {!image && (
           <div onClick={() => inputRef.current?.click()} style={{ border: `2px dashed ${T.line}`, borderRadius: 18, padding: "44px 16px", textAlign: "center", cursor: "pointer", background: T.panel }}>
             <div style={{ width: 52, height: 52, borderRadius: 16, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
@@ -1211,7 +1245,7 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
         <button onClick={() => shiftMonth(-1)} style={iconBtnStyle}><ChevronLeft size={16} color={T.ink} /></button>
         <button onClick={() => shiftMonth(1)} style={iconBtnStyle}><ChevronRight size={16} color={T.ink} /></button>
       </>} />
-      <div className="orbit-split" style={screenBox}>
+      <div className="orbit-split orbit-stagger" style={screenBox}>
         <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 16, padding: 14 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 }}>
             {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, color: T.inkFaint }}>{d}</div>)}
@@ -1239,7 +1273,7 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
 
         {dayEvents.length === 0 && <div style={{ fontSize: 13, color: T.inkFaint, padding: "10px 0" }}>No events scheduled.</div>}
         {dayEvents.map((ev) => (
-          <div key={ev.id} style={rowCardStyle}>
+          <div key={ev.id} className="orbit-card" style={rowCardStyle}>
             <div style={{ width: 4, height: 34, borderRadius: 4, background: ev.color }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{ev.title}</div>
@@ -1253,7 +1287,7 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
         ))}
 
         {showForm && (
-          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
             <FieldLabel>Title</FieldLabel>
             <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Math 21 Quiz" style={inputStyle} autoFocus />
             <FieldLabel>Starts</FieldLabel>
@@ -1299,7 +1333,7 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority }) {
   return (
     <div>
       <TopBar title="My Tasks" onBack={back} />
-      <div style={screenBox}>
+      <div className="orbit-stagger" style={screenBox}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {["All", "Active", "Completed"].map((f) => (
             <button key={f} onClick={() => setFilter(f)} style={pill(filter === f)}>{f}</button>
@@ -1310,7 +1344,7 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority }) {
           </button>
         </div>
         {tasks.length === 0 && (
-          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
             <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><CheckSquare size={18} /></div>
             <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>No tasks yet</div>
             <div style={{ fontSize: 12.5, color: T.inkFaint }}>Add your first one below and give it a priority.</div>
@@ -1318,8 +1352,8 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority }) {
         )}
         <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {visible.map((t) => (
-            <div key={t.id} style={rowCardStyle} onClick={() => onToggle(t)}>
-              <div style={{ cursor: "pointer" }}>{t.done ? <CheckSquare size={19} color={T.primary} /> : <Square size={19} color={T.inkFaint} />}</div>
+            <div key={t.id} className="orbit-card" style={rowCardStyle} onClick={() => onToggle(t)}>
+              <span key={String(t.done)} className={t.done ? "orbit-pop" : undefined} style={{ cursor: "pointer", display: "flex" }}>{t.done ? <CheckSquare size={20} color={T.primary} /> : <Square size={20} color={T.inkFaint} />}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: t.done ? T.inkFaint : T.ink, textDecoration: t.done ? "line-through" : "none", overflowWrap: "anywhere" }}>{t.text}</div>
                 {openId === t.id && (
@@ -1444,12 +1478,14 @@ function GroupFlowModal({ initialMode, onClose, onCreate, onJoin, go }) {
 
   return (
     <div
+      className="orbit-overlay"
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(8,28,19,0.6)", zIndex: 100, display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", padding: isDesktop ? 24 : 0 }}
+      style={{ position: "fixed", inset: 0, background: "rgba(10,30,22,0.5)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", padding: isDesktop ? 24 : 0 }}
     >
       <div
+        className={isDesktop ? "orbit-dialog" : "orbit-dialog orbit-sheet"}
         onClick={(e) => e.stopPropagation()}
-        style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: isDesktop ? 20 : "20px 20px 0 0", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", ...STARFIELD_BG }}
+        style={{ background: T.panel, border: `1px solid ${T.line}`, boxShadow: T.shadowLg, borderRadius: isDesktop ? 22 : "22px 22px 0 0", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", ...STARFIELD_BG }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px 12px", borderBottom: `1px solid ${T.line}` }}>
           <span style={{ fontWeight: 800, fontSize: 16, color: T.ink }}>{created ? "Group created" : mode === "create" ? "New group" : "Join a group"}</span>
@@ -1521,16 +1557,16 @@ function GroupsListScreen({ back, groups, go, onCreate, onJoin, activeId }) {
   return (
     <div>
       <TopBar title="Groups" />
-      <div style={screenBox}>
+      <div className="orbit-stagger" style={screenBox}>
         {groups.length === 0 && (
-          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
             <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><Users size={18} /></div>
             <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink }}>No groups yet</div>
             <div style={{ fontSize: 12.5, color: T.inkFaint }}>Start one for your class or study crew, or join a friend's with an invite code.</div>
           </div>
         )}
         {groups.map((g) => (
-          <div key={g.id} onClick={() => go("group", g.id)} style={{ ...rowCardStyle, cursor: "pointer", ...(g.id === activeId ? { border: `1px solid ${T.primary}`, background: T.primarySoft } : {}) }}>
+          <div key={g.id} onClick={() => go("group", g.id)} className="orbit-card" style={{ ...rowCardStyle, cursor: "pointer", ...(g.id === activeId ? { border: `1px solid ${T.primary}`, background: T.primarySoft } : {}) }}>
             <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><Users size={18} /></div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</div>
@@ -1594,7 +1630,7 @@ function GroupScreen({ back, user, group, embedded = false }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: embedded ? "auto" : "100%", flex: embedded ? 1 : undefined, minHeight: 0 }}>
       <TopBar title={group.name} onBack={embedded ? undefined : back} right={<>
-        <span style={{ fontSize: 11, fontWeight: 700, color: connected ? "#0E9F6E" : T.inkFaint, alignSelf: "center", marginRight: 4 }}>{connected ? "● live" : "connecting…"}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: connected ? T.primary : T.inkFaint, alignSelf: "center", marginRight: 4 }}>{connected ? "● live" : "connecting…"}</span>
         <button onClick={() => setShowCode((s) => !s)} style={iconBtnStyle}><Users size={15} color={T.ink} /></button>
       </>} />
       {showCode && (
@@ -1613,7 +1649,7 @@ function GroupScreen({ back, user, group, embedded = false }) {
           const mine = m.sender_id ? m.sender_id === user.id : m.sender_name === (user.name || user.username);
           const sentAt = m.created_at ? new Date(m.created_at.endsWith("Z") || /[+-]\d\d:\d\d$/.test(m.created_at) ? m.created_at : `${m.created_at}Z`) : null;
           return (
-            <div key={m.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: embedded ? "70%" : "78%" }}>
+            <div key={m.id} className="orbit-msg" style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: embedded ? "70%" : "78%" }}>
               {!mine && <div style={{ fontSize: 11, fontWeight: 700, color: T.primary, marginBottom: 2 }}>{m.sender_name}</div>}
               <div style={{ background: mine ? T.primary : T.panel, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: 14, padding: "10px 13px", fontSize: 13.5, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{m.text}</div>
               {sentAt && !isNaN(sentAt) && <div style={{ fontSize: 10.5, color: T.inkFaint, marginTop: 3, textAlign: mine ? "right" : "left" }}>{sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</div>}
@@ -1679,8 +1715,8 @@ function InsightsScreen({ back, tasks, studySessions, onLogSession }) {
   return (
     <div>
       <TopBar title="Insights" onBack={back} />
-      <div style={screenBox}>
-        <div style={{ ...rowCardStyle, flexDirection: "column", gap: 10, padding: 18 }}>
+      <div className="orbit-stagger" style={screenBox}>
+        <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", gap: 10, padding: 18 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study timer</div>
           <div style={{ fontSize: 34, fontWeight: 800, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{timerLabel}</div>
           {!running ? (
@@ -1693,26 +1729,26 @@ function InsightsScreen({ back, tasks, studySessions, onLogSession }) {
         </div>
 
         <div style={{ display: "flex", gap: 12 }}>
-          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", flex: 1, gap: 6, padding: "16px 10px" }}>
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", flex: 1, gap: 6, padding: "16px 10px" }}>
             <div style={{ position: "relative" }}>
               <ProgressRing pct={pct} />
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: T.ink }}>{pct}%</div>
             </div>
             <div style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>{done} of {tasks.length} tasks</div>
           </div>
-          <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "flex-start", flex: 1, gap: 6, padding: "16px 14px", justifyContent: "center" }}>
-            <TrendingUp size={18} color="#0E9F6E" />
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "flex-start", flex: 1, gap: 6, padding: "16px 14px", justifyContent: "center" }}>
+            <TrendingUp size={18} color={T.primary} />
             <div style={{ fontSize: 20, fontWeight: 800, color: T.ink }}>{totalLabel}</div>
             <div style={{ fontSize: 11.5, color: T.inkFaint, fontWeight: 700 }}>Last 7 days</div>
           </div>
         </div>
 
-        <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 14, padding: 16 }}>
+        <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 14, padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>Study time this week</div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 100 }}>
             {weekData.map((d, i) => (
               <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <div style={{ width: "100%", borderRadius: 6, background: T.primary, height: `${Math.max(4, (d.minutes / maxMinutes) * 80)}px`, opacity: 0.85 }} />
+                <div className="orbit-bar" style={{ width: "100%", borderRadius: 8, background: `linear-gradient(180deg, ${T.primaryLight}, ${T.primary})`, height: `${Math.max(4, (d.minutes / maxMinutes) * 80)}px`, animationDelay: `${i * 70}ms` }} />
                 <div style={{ fontSize: 10.5, color: T.inkFaint, fontWeight: 600 }}>{d.day}</div>
               </div>
             ))}
@@ -1736,13 +1772,13 @@ function RemindersScreen({ back, reminders, onAdd }) {
   return (
     <div>
       <TopBar title="Reminders" onBack={back} />
-      <div style={screenBox}>
+      <div className="orbit-stagger" style={screenBox}>
         {reminders.length === 0 && <div style={{ fontSize: 13, color: T.inkFaint }}>No reminders yet.</div>}
         <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {reminders.map((r) => {
           const Icon = kindIcon[r.kind] || Bell;
           return (
-            <div key={r.id} style={rowCardStyle}>
+            <div key={r.id} className="orbit-card" style={rowCardStyle}>
               <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><Icon size={17} /></div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: 13.5, color: T.ink }}>{r.title}</div>
@@ -1871,8 +1907,8 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
     <div>
       <TopBar title="Profile" onBack={back} />
       {legalModal && <LegalModal type={legalModal} onClose={() => setLegalModal(null)} />}
-      <div style={screenBox}>
-        <div style={{ ...rowCardStyle, gap: 14 }}>
+      <div className="orbit-stagger" style={screenBox}>
+        <div className="orbit-card" style={{ ...rowCardStyle, gap: 14 }}>
           <div style={{ width: 50, height: 50, borderRadius: 999, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", color: T.primary, fontWeight: 800, fontSize: 18 }}>{(user.name || user.username)[0].toUpperCase()}</div>
           <div>
             <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>{user.name || user.username}</div>
@@ -1881,15 +1917,15 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
         </div>
 
         {user.email ? (
-          <div style={rowCardStyle}>
+          <div className="orbit-card" style={rowCardStyle}>
             <Mail size={17} color={T.inkSoft} />
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13.5, color: T.ink }}>{user.email}</div>
-              <div style={{ fontSize: 11.5, color: user.is_verified ? "#0E9F6E" : T.inkFaint }}>{user.is_verified ? "Verified" : "Verification pending"}</div>
+              <div style={{ fontSize: 11.5, color: user.is_verified ? T.primary : T.inkFaint }}>{user.is_verified ? "Verified" : "Verification pending"}</div>
             </div>
           </div>
         ) : (
-          <form onSubmit={linkEmail} style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+          <form onSubmit={linkEmail} className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10 }}>
             <FieldLabel icon={Mail}>Add an email (optional)</FieldLabel>
             <div style={{ fontSize: 12, color: T.inkFaint, marginTop: -6 }}>Lets you recover your account if you forget your password.</div>
             <input type="email" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} placeholder="you@school.edu" style={inputStyle} />
@@ -1900,23 +1936,23 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
           </form>
         )}
 
-        <div onClick={onLogout} style={{ ...rowCardStyle, cursor: "pointer" }}>
+        <div onClick={onLogout} className="orbit-card" style={{ ...rowCardStyle, cursor: "pointer" }}>
           <LogOut size={17} color={T.danger} />
           <div style={{ fontSize: 13.5, color: T.danger, fontWeight: 700 }}>Sign out</div>
         </div>
 
         <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 10 }}>Legal</div>
-        <div onClick={() => setLegalModal("terms")} style={{ ...rowCardStyle, cursor: "pointer" }}>
+        <div onClick={() => setLegalModal("terms")} className="orbit-card" style={{ ...rowCardStyle, cursor: "pointer" }}>
           <FileText size={17} color={T.inkSoft} />
           <div style={{ fontSize: 13.5, color: T.ink }}>Terms of Service</div>
         </div>
-        <div onClick={() => setLegalModal("privacy")} style={{ ...rowCardStyle, cursor: "pointer" }}>
+        <div onClick={() => setLegalModal("privacy")} className="orbit-card" style={{ ...rowCardStyle, cursor: "pointer" }}>
           <Lock size={17} color={T.inkSoft} />
           <div style={{ fontSize: 13.5, color: T.ink }}>Privacy Policy</div>
         </div>
 
         <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 10 }}>Your data</div>
-        <div onClick={exporting ? undefined : exportData} style={{ ...rowCardStyle, cursor: exporting ? "default" : "pointer", opacity: exporting ? 0.6 : 1 }}>
+        <div onClick={exporting ? undefined : exportData} className="orbit-card" style={{ ...rowCardStyle, cursor: exporting ? "default" : "pointer", opacity: exporting ? 0.6 : 1 }}>
           {exporting ? <Loader2 size={17} color={T.inkSoft} style={{ animation: "spin 1s linear infinite" }} /> : <Download size={17} color={T.inkSoft} />}
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13.5, color: T.ink }}>Export my data</div>
@@ -1926,12 +1962,12 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
         {exportError && <ErrorBanner message={exportError} />}
 
         {!showDelete ? (
-          <div onClick={() => setShowDelete(true)} style={{ ...rowCardStyle, cursor: "pointer" }}>
+          <div onClick={() => setShowDelete(true)} className="orbit-card" style={{ ...rowCardStyle, cursor: "pointer" }}>
             <Trash2 size={17} color={T.danger} />
             <div style={{ fontSize: 13.5, color: T.danger, fontWeight: 700 }}>Delete account</div>
           </div>
         ) : (
-          <form onSubmit={deleteAccount} style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10, border: `1px solid ${T.danger}` }}>
+          <form onSubmit={deleteAccount} className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 10, border: `1px solid ${T.danger}` }}>
             <FieldLabel icon={Trash2}>Delete your account</FieldLabel>
             <div style={{ fontSize: 12, color: T.inkSoft, lineHeight: 1.5 }}>
               This permanently deletes your folders, notes, tasks, reminders, events and study history, and signs you out everywhere. It can't be undone. Messages you've posted in groups stay visible to other members under your display name. Consider exporting your data first.
@@ -1951,7 +1987,7 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
           <Zap size={14} color={T.primary} /> Premium — coming soon
         </div>
         {premium.map((p) => (
-          <div key={p.title} style={{ ...rowCardStyle, opacity: 0.9 }}>
+          <div key={p.title} className="orbit-card" style={{ ...rowCardStyle, opacity: 0.9 }}>
             <div style={{ ...iconTileStyle, background: T.primarySoft, color: T.primary }}><p.icon size={17} /></div>
             <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 13.5, color: T.ink }}>{p.title}</div><div style={{ fontSize: 11.5, color: T.inkFaint }}>{p.desc}</div></div>
             <span style={{ fontSize: 10.5, fontWeight: 700, color: T.primary, background: T.primarySoft, padding: "3px 8px", borderRadius: 7 }}>SOON</span>
@@ -2191,37 +2227,37 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "640px", background: T.bg, fontFamily: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif", ...STARFIELD_BG }}>
+    <div style={{ display: "flex", minHeight: "640px", background: T.bg, fontFamily: "'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif", ...STARFIELD_BG }}>
       <div className="orbit-sidebar" style={{ width: 220, background: T.sidebar, padding: "22px 14px", flexShrink: 0, display: "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px 26px" }}>
           <OrbitCatLogo size={34} />
           <span style={{ color: "#fff", fontWeight: 800, fontSize: 16, letterSpacing: -0.3 }}>ORBIT</span>
         </div>
         {NAV_ITEMS.map((n) => (
-          <div key={n.key} onClick={() => go(n.key)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 11, cursor: "pointer", marginBottom: 3, background: screen === n.key ? T.sidebarSoft : "transparent", color: screen === n.key ? "#fff" : "#7FA08C" }}>
+          <div key={n.key} className="orbit-navitem" onClick={() => go(n.key)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 12, cursor: "pointer", marginBottom: 4, background: screen === n.key ? T.sidebarSoft : "transparent", color: screen === n.key ? "#fff" : "#8FB09E", boxShadow: screen === n.key ? `inset 3px 0 0 ${T.primaryBright}` : "none" }}>
             <n.icon size={16} /><span style={{ fontSize: 13.5, fontWeight: 600 }}>{n.label}</span>
           </div>
         ))}
-        <div onClick={() => go("capture")} style={{ ...primaryBtn, marginTop: 18, width: "100%", boxSizing: "border-box" }}><Camera size={15} /> New capture</div>
+        <div className="orbit-lift" onClick={() => go("capture")} style={{ ...primaryBtn, marginTop: 18, width: "100%", boxSizing: "border-box" }}><Camera size={15} /> New capture</div>
       </div>
 
       <div className="orbit-main" style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "center" }}>
-        <div className="orbit-frame" style={{ width: "100%", maxWidth: 420, background: T.bg, position: "relative", minHeight: "640px" }}>
+        <div className="orbit-frame" style={{ width: "100%", maxWidth: 420, background: "transparent", position: "relative", minHeight: "640px" }}>
           {inviteNotice && (
             <div style={{ margin: "12px 20px 0" }}>
               <ErrorBanner message={inviteNotice} />
               <div onClick={() => setInviteNotice("")} style={{ fontSize: 12, fontWeight: 700, color: T.inkSoft, cursor: "pointer", marginTop: 4 }}>Dismiss</div>
             </div>
           )}
-          <div key={screen} className={["archive", "folder", "home", "todo", "reminders", "calendar", "groupslist", "group", "capture"].includes(screen) ? "orbit-page" : "orbit-page orbit-narrow"} style={{ animation: "fadeIn 0.32s ease" }}>{renderScreen()}</div>
-          <div className="orbit-bottomnav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 420, margin: "0 auto", background: T.panel, borderTop: `1px solid ${T.line}`, padding: "10px 22px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div key={screen} className={["archive", "folder", "home", "todo", "reminders", "calendar", "groupslist", "group", "capture"].includes(screen) ? "orbit-page" : "orbit-page orbit-narrow"} >{renderScreen()}</div>
+          <div className="orbit-bottomnav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 420, margin: "0 auto", background: "rgba(255,255,255,0.86)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", borderTop: `1px solid ${T.line}`, borderRadius: "20px 20px 0 0", boxShadow: "0 -8px 30px rgba(16,35,26,0.07)", padding: "10px 22px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             {MOBILE_NAV.map((n) => n.key === "capture" ? (
-              <div key={n.key} onClick={() => go(n.key)} style={{ width: 46, height: 46, borderRadius: 999, background: `linear-gradient(135deg, #6FDA9C, ${T.primary})`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: `0 6px 18px ${T.primaryGlow}` }}>
+              <div key={n.key} className="orbit-fab" onClick={() => go(n.key)} style={{ width: 46, height: 46, borderRadius: 999, background: `linear-gradient(135deg, ${T.primaryLight}, ${T.primary})`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: `0 6px 18px ${T.primaryGlow}` }}>
                 <Plus size={20} color="#fff" />
               </div>
             ) : (
               <div key={n.key} onClick={() => go(n.key)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, cursor: "pointer", minWidth: 44 }}>
-                <n.icon size={19} color={screen === n.key ? T.primary : T.inkFaint} />
+                <n.icon className={screen === n.key ? "orbit-bump" : undefined} size={19} color={screen === n.key ? T.primary : T.inkFaint} />
                 <span style={{ fontSize: 10, fontWeight: 700, color: screen === n.key ? T.primary : T.inkFaint }}>{n.label}</span>
               </div>
             ))}
@@ -2250,9 +2286,98 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   );
 }
 
+/* ------------------------------ GLOBAL STYLES --------------------------------- */
+
+// Rendered once at the app root so animations/hover states exist on every
+// screen, including the ones that appear before MainShell mounts.
+function GlobalStyles() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+      :root { --ease: cubic-bezier(.22, 1, .36, 1); }
+      html { -webkit-text-size-adjust: 100%; }
+      body { margin: 0; background: ${T.bg}; color: ${T.ink}; font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
+      button, input, textarea, select { font-family: inherit; }
+      ::selection { background: rgba(61, 220, 151, 0.3); }
+      * { scrollbar-width: thin; scrollbar-color: ${T.line} transparent; }
+      *::-webkit-scrollbar { width: 8px; height: 8px; }
+      *::-webkit-scrollbar-thumb { background: ${T.line}; border-radius: 8px; }
+
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+      @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+      @keyframes popIn { from { opacity: 0; transform: translateY(12px) scale(.96); } to { opacity: 1; transform: none; } }
+      @keyframes slideUp { from { transform: translateY(100%); } to { transform: none; } }
+      @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+      @keyframes pulseRing { 0% { box-shadow: 0 0 0 0 rgba(10,132,84,.4), 0 6px 18px ${T.primaryGlow}; } 70% { box-shadow: 0 0 0 14px rgba(10,132,84,0), 0 6px 18px ${T.primaryGlow}; } 100% { box-shadow: 0 0 0 0 rgba(10,132,84,0), 0 6px 18px ${T.primaryGlow}; } }
+      @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.3); } 100% { transform: scale(1); } }
+      @keyframes checkPop { 0% { transform: scale(.55); } 60% { transform: scale(1.22); } 100% { transform: scale(1); } }
+      @keyframes growY { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+
+      /* page + content entrances */
+      .orbit-page { animation: fadeIn .35s var(--ease) both; }
+      .orbit-stagger > *, .orbit-cols > div > *, .orbit-split > div > * { animation: fadeUp .55s var(--ease) both; }
+      .orbit-stagger > *:nth-child(1), .orbit-cols > div > *:nth-child(1), .orbit-split > div > *:nth-child(1) { animation-delay: .02s; }
+      .orbit-stagger > *:nth-child(2), .orbit-cols > div > *:nth-child(2), .orbit-split > div > *:nth-child(2) { animation-delay: .07s; }
+      .orbit-stagger > *:nth-child(3), .orbit-cols > div > *:nth-child(3), .orbit-split > div > *:nth-child(3) { animation-delay: .12s; }
+      .orbit-stagger > *:nth-child(4), .orbit-cols > div > *:nth-child(4), .orbit-split > div > *:nth-child(4) { animation-delay: .17s; }
+      .orbit-stagger > *:nth-child(5), .orbit-cols > div > *:nth-child(5), .orbit-split > div > *:nth-child(5) { animation-delay: .22s; }
+      .orbit-stagger > *:nth-child(6), .orbit-cols > div > *:nth-child(6), .orbit-split > div > *:nth-child(6) { animation-delay: .27s; }
+      .orbit-stagger > *:nth-child(7) { animation-delay: .32s; }
+      .orbit-stagger > *:nth-child(8) { animation-delay: .36s; }
+      .orbit-stagger > *:nth-child(n+9) { animation-delay: .4s; }
+
+      /* modals */
+      .orbit-overlay { animation: overlayIn .22s ease both; }
+      .orbit-dialog { animation: popIn .35s var(--ease) both; }
+      @media (max-width: 859px) { .orbit-dialog.orbit-sheet { animation: slideUp .4s var(--ease) both; } }
+
+      /* small motion */
+      .orbit-float { animation: float 5s ease-in-out infinite; }
+      .orbit-fab { animation: pulseRing 2.8s ease-out infinite; }
+      .orbit-bump { animation: bump .4s var(--ease); }
+      .orbit-pop { animation: checkPop .38s var(--ease); }
+      .orbit-pop-in { animation: popIn .3s var(--ease) both; }
+      .orbit-msg { animation: fadeUp .3s var(--ease) both; }
+      .orbit-bar { transform-origin: bottom; animation: growY .8s var(--ease) both; }
+
+      /* interactive surfaces */
+      .orbit-card { transition: transform .28s var(--ease), box-shadow .28s var(--ease), border-color .2s ease; }
+      .orbit-card[style*="cursor: pointer"]:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(16,35,26,.11) !important; border-color: rgba(10,132,84,.32) !important; }
+      .orbit-card[style*="cursor: pointer"]:active { transform: translateY(-1px) scale(.992); }
+      .orbit-navitem { transition: background-color .2s ease, color .2s ease, transform .2s var(--ease); }
+      .orbit-navitem:hover { background: rgba(255,255,255,.06) !important; color: #fff !important; transform: translateX(2px); }
+      .orbit-lift { transition: transform .2s var(--ease), box-shadow .2s ease; }
+      .orbit-lift:hover { transform: translateY(-2px); }
+      button { transition: transform .2s var(--ease), box-shadow .2s ease, background-color .2s ease, border-color .2s ease, opacity .2s ease; }
+      button:not(:disabled):hover { transform: translateY(-1px); }
+      button:not(:disabled):active { transform: scale(.97); }
+      button:disabled { cursor: not-allowed; }
+      input, textarea, select { transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease; }
+      input:focus, textarea:focus, select:focus { outline: none; border-color: ${T.primary} !important; box-shadow: 0 0 0 4px ${T.primarySoft} !important; }
+      :focus-visible { outline: 2px solid ${T.primary}; outline-offset: 2px; }
+      input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important; transition-duration: .01ms !important; }
+      }
+    `}</style>
+  );
+}
+
 /* ----------------------------------- APP --------------------------------------- */
 
 export default function App() {
+  return (
+    <>
+      <GlobalStyles />
+      <AppInner />
+    </>
+  );
+}
+
+function AppInner() {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("resetToken"));
