@@ -314,6 +314,29 @@ def me(current_user: models.User = Depends(auth.get_current_user)):
     return current_user
 
 
+@app.patch("/me", response_model=schemas.UserOut)
+@limiter.limit("10/minute")
+def update_profile(
+    request: Request,
+    payload: schemas.UpdateProfileRequest,
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Change the display name. The username (login identifier) can't be changed."""
+    if payload.name != user.name:
+        user.name = payload.name
+        # Chat messages store the sender's name as text, so bring this person's
+        # earlier messages along — otherwise one chat would show two names for
+        # them. Only messages with a recorded author (sender_id) can be matched.
+        db.query(models.GroupMessage).filter(models.GroupMessage.sender_id == user.id).update(
+            {"sender_name": payload.name}, synchronize_session=False
+        )
+        db.commit()
+        db.refresh(user)
+        logger.info("Display name changed for account %s", user.id)
+    return user
+
+
 # ============================== FOLDERS & ITEMS ==============================
 
 def _item_out(item: models.Item) -> dict:
@@ -773,6 +796,12 @@ async def group_chat_ws(websocket: WebSocket, group_id: str, token: Optional[str
             text = (data.get("text") or "").strip()
             if not text:
                 continue
+            # This connection can outlive a display-name change (or an account
+            # deletion) made from another tab, so re-read the user every message.
+            db.refresh(user)
+            if user.deleted_at:
+                await websocket.close(code=4401)
+                break
             msg = models.GroupMessage(
                 group_id=group_id,
                 sender_id=user.id,

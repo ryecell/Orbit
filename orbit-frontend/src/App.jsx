@@ -2062,6 +2062,12 @@ const folderApi = {
     accountRequest("/folders/order", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }),
 };
 
+// Display-name change (kept here so api.js doesn't need changes).
+const profileApi = {
+  rename: (name) =>
+    accountRequest("/me", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then((r) => r.json()),
+};
+
 // Study session rename/delete (kept here so api.js doesn't need changes).
 const studyApi = {
   rename: (id, title) =>
@@ -2080,6 +2086,10 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
   const [deletePassword, setDeletePassword] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [nameError, setNameError] = useState("");
 
   async function exportData() {
     setExporting(true);
@@ -2120,6 +2130,30 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
     }
   }
 
+  function startNameEdit() {
+    setNameDraft(user.name || user.username);
+    setNameError("");
+    setEditingName(true);
+  }
+
+  async function saveName(e) {
+    e.preventDefault();
+    const next = nameDraft.trim().replace(/\s+/g, " ");
+    if (!next) { setNameError("Display name can't be empty."); return; }
+    if (next === (user.name || user.username)) { setEditingName(false); return; } // nothing changed
+    setSavingName(true);
+    setNameError("");
+    try {
+      const updated = await profileApi.rename(next);
+      onUserUpdate(updated);
+      setEditingName(false);
+    } catch (err) {
+      setNameError(err.message || "Couldn't change your display name.");
+    } finally {
+      setSavingName(false);
+    }
+  }
+
   async function linkEmail(e) {
     e.preventDefault();
     setLinking(true);
@@ -2149,12 +2183,40 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
       <TopBar title="Profile" onBack={back} />
       {legalModal && <LegalModal type={legalModal} onClose={() => setLegalModal(null)} />}
       <div className="orbit-stagger" style={screenBox}>
-        <div className="orbit-card" style={{ ...rowCardStyle, gap: 14 }}>
-          <div style={{ width: 50, height: 50, borderRadius: 999, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", color: T.primary, fontWeight: 800, fontSize: 18 }}>{(user.name || user.username)[0].toUpperCase()}</div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>{user.name || user.username}</div>
-            <div style={{ fontSize: 12.5, color: T.inkFaint }}>@{user.username}</div>
+        <div className="orbit-card" style={{ ...rowCardStyle, gap: 14, alignItems: editingName ? "flex-start" : "center" }}>
+          <div style={{ flexShrink: 0, width: 50, height: 50, borderRadius: 999, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", color: T.primary, fontWeight: 800, fontSize: 18 }}>{Array.from(user.name || user.username)[0].toUpperCase()}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {editingName ? (
+              <form onSubmit={saveName} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <input
+                  autoFocus
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Escape") setEditingName(false); }}
+                  maxLength={40}
+                  placeholder="Display name"
+                  aria-label="Display name"
+                  style={{ ...inputStyle, padding: "9px 12px" }}
+                />
+                <div style={{ fontSize: 11.5, color: T.inkFaint }}>This is the name other people see. Your username (@{user.username}) stays the same.</div>
+                {nameError && <ErrorBanner message={nameError} />}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" disabled={savingName} onClick={() => setEditingName(false)} style={{ ...secondaryBtn, flex: 1, padding: "9px 12px" }}>Cancel</button>
+                  <button type="submit" disabled={savingName || !nameDraft.trim()} style={{ ...primaryBtn, flex: 1, padding: "9px 12px", opacity: savingName || !nameDraft.trim() ? 0.6 : 1 }}>
+                    {savingName ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : "Save"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink, overflowWrap: "anywhere" }}>{user.name || user.username}</div>
+                <div style={{ fontSize: 12.5, color: T.inkFaint }}>@{user.username}</div>
+              </>
+            )}
           </div>
+          {!editingName && (
+            <button onClick={startNameEdit} aria-label="Edit display name" title="Edit display name" style={iconBtnStyle}><Pencil size={15} color={T.ink} /></button>
+          )}
         </div>
 
         {user.email ? (

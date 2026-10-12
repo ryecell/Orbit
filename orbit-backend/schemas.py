@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List, Literal, Optional
 import re
+import unicodedata
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -52,6 +53,30 @@ class ForgotPasswordRequest(BaseModel):
 
 class LinkEmailRequest(BaseModel):
     email: EmailStr
+
+
+DISPLAY_NAME_MAX = 40
+
+
+class UpdateProfileRequest(BaseModel):
+    # The display name is what other people see (chat, greeting). It is NOT the
+    # login identifier — that's the username, which never changes here.
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, v: str) -> str:
+        v = " ".join(v.split())  # trims and collapses runs of whitespace/newlines
+        if not v:
+            raise ValueError("Display name can't be empty")
+        if len(v) > DISPLAY_NAME_MAX:
+            raise ValueError(f"Display name can be at most {DISPLAY_NAME_MAX} characters")
+        # Refuse invisible/control characters (zero-width spaces, right-to-left
+        # overrides…) that could be used to impersonate someone in chat. The
+        # zero-width joiner stays allowed because emoji sequences need it.
+        if any(unicodedata.category(ch).startswith("C") and ch != "\u200d" for ch in v):
+            raise ValueError("Display name contains characters that aren't allowed")
+        return v
 
 
 class ResetPasswordRequest(BaseModel):
