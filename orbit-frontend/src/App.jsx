@@ -216,11 +216,28 @@ function ErrorBanner({ message }) {
   );
 }
 
+// Orbiting-planet loader. The free hosting tier sleeps when idle, so the very
+// first request after a quiet spell can take a while — after a few seconds the
+// loader says so instead of leaving people staring at a spinner.
 function CenterSpinner({ label }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setSlow(true), 6000);
+    return () => clearTimeout(id);
+  }, []);
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, minHeight: "640px", background: T.bg, color: T.inkSoft, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
-      <Loader2 size={22} color={T.primary} style={{ animation: "spin 1s linear infinite" }} />
-      <span style={{ fontSize: 13 }}>{label}</span>
+    <div role="status" aria-live="polite" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, minHeight: "640px", background: T.bg, color: T.inkSoft, ...STARFIELD_BG, animation: "fadeIn 0.4s ease", padding: 24, textAlign: "center" }}>
+      <div className="orbit-loader" aria-hidden="true">
+        <span className="orbit-loader-ring orbit-loader-ring-outer"><span className="orbit-loader-moon orbit-loader-moon-gold" /></span>
+        <span className="orbit-loader-ring orbit-loader-ring-inner"><span className="orbit-loader-moon" /></span>
+        <span className="orbit-loader-core" />
+      </div>
+      <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: -0.4, color: T.ink }}>Orbit</div>
+      <div className="orbit-loader-label" style={{ fontSize: 13, color: T.inkSoft }}>{label}</div>
+      <div className="orbit-loader-bar" aria-hidden="true"><span /></div>
+      <div style={{ fontSize: 12, color: T.inkFaint, maxWidth: 280, lineHeight: 1.5, minHeight: 36, opacity: slow ? 1 : 0, transition: "opacity .6s ease" }}>
+        Waking the server up — the first load after a quiet spell can take up to a minute.
+      </div>
     </div>
   );
 }
@@ -2884,6 +2901,21 @@ function GlobalStyles() {
       @keyframes cardOut { to { opacity: 0; transform: translateY(-14px) scale(.97); } }
       @keyframes drift { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(34px, -26px) scale(1.1); } }
       @keyframes twinkle { 0%, 100% { opacity: .18; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.25); } }
+
+      @keyframes corePulse { 0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(10,132,84,.35), 0 0 22px rgba(61,220,151,.55); } 50% { transform: scale(1.14); box-shadow: 0 0 0 12px rgba(10,132,84,0), 0 0 30px rgba(61,220,151,.8); } }
+      @keyframes labelBreathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+      /* loading screen */
+      .orbit-loader { position: relative; width: 112px; height: 112px; display: flex; align-items: center; justify-content: center; }
+      .orbit-loader-core { width: 26px; height: 26px; border-radius: 999px; background: radial-gradient(circle at 32% 28%, ${T.primaryBright}, ${T.primary} 70%); animation: corePulse 2.2s ease-in-out infinite; }
+      .orbit-loader-ring { position: absolute; border-radius: 999px; border: 1px solid rgba(10,132,84,.22); }
+      .orbit-loader-ring-inner { width: 64px; height: 64px; animation: spin 1.7s linear infinite; }
+      .orbit-loader-ring-outer { width: 112px; height: 112px; border-style: dashed; border-color: rgba(217,164,65,.35); animation: spin 3.1s linear infinite reverse; }
+      .orbit-loader-moon { position: absolute; top: -4.5px; left: calc(50% - 4.5px); width: 9px; height: 9px; border-radius: 999px; background: ${T.primaryBright}; box-shadow: 0 0 10px ${T.primaryBright}; }
+      .orbit-loader-moon-gold { top: -5.5px; width: 11px; height: 11px; left: calc(50% - 5.5px); background: ${T.accent}; box-shadow: 0 0 12px ${T.accent}; }
+      .orbit-loader-label { animation: labelBreathe 2s ease-in-out infinite; }
+      .orbit-loader-bar { width: 150px; height: 3px; border-radius: 3px; overflow: hidden; background: rgba(10,132,84,.12); }
+      .orbit-loader-bar span { display: block; height: 100%; width: 38%; border-radius: 3px; background: linear-gradient(90deg, transparent, ${T.primaryBright}, ${T.primary}); animation: progressSlide 1.3s var(--ease) infinite; }
 
       /* page + content entrances */
       .orbit-page { animation: fadeIn .35s var(--ease) both; }
