@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Literal, Optional
 import re
 import unicodedata
@@ -224,10 +224,31 @@ class FolderOut(BaseModel):
 Priority = Literal["Low", "Medium", "High"]
 
 
+def _clean_due_date(value):
+    """A task deadline is a plain calendar date ("2026-10-31"), or "" for none."""
+    if value is None:
+        return value
+    value = str(value).strip()
+    if value == "":
+        return ""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError("Deadline must be a date like 2026-10-31.")
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        raise ValueError("That isn't a real calendar date.")
+    return value
+
+
 class TaskCreate(BaseModel):
     text: str
     priority: Priority = "Medium"
     due_date: str = ""
+
+    @field_validator("due_date", mode="before")
+    @classmethod
+    def _check_due_date(cls, v):
+        return _clean_due_date(v if v is not None else "")
 
 
 class TaskUpdate(BaseModel):
@@ -235,6 +256,11 @@ class TaskUpdate(BaseModel):
     priority: Optional[Priority] = None
     done: Optional[bool] = None
     due_date: Optional[str] = None
+
+    @field_validator("due_date", mode="before")
+    @classmethod
+    def _check_due_date(cls, v):
+        return _clean_due_date(v)
 
 
 class TaskOut(BaseModel):
@@ -291,9 +317,15 @@ class EventOut(BaseModel):
     start_time: datetime
     end_time: Optional[datetime] = None
     color: str
+    synced_to_google: bool = False
 
     class Config:
         from_attributes = True
+
+
+class GoogleConnectRequest(BaseModel):
+    # Browser's IANA zone, e.g. "Asia/Manila" — Orbit event times are wall-clock in it.
+    timezone: Optional[str] = Field(default=None, max_length=64)
 
 
 # ---------- Study sessions (Insights) ----------

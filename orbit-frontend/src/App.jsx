@@ -269,6 +269,49 @@ function PriorityTag({ p }) {
   const c = colors[p] || T.inkFaint;
   return <span style={{ fontSize: 11, fontWeight: 700, color: c, background: `${c}15`, padding: "3px 8px", borderRadius: 8 }}>{p}</span>;
 }
+// Task deadlines are plain calendar dates ("YYYY-MM-DD") — no time zone to get wrong.
+function isoToLocalDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function deadlineInfo(due, done) {
+  const d = isoToLocalDate(due);
+  if (!d) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((d - today) / 86400000);
+  const short = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  if (done) return { label: `Due ${short}`, color: T.inkFaint };
+  if (days < 0) return { label: days === -1 ? "Overdue · yesterday" : `Overdue · ${short}`, color: T.danger };
+  if (days === 0) return { label: "Due today", color: "#B8760F" };
+  if (days === 1) return { label: "Due tomorrow", color: "#B8760F" };
+  if (days < 7) return { label: `Due ${d.toLocaleDateString(undefined, { weekday: "long" })}`, color: T.inkSoft };
+  return { label: `Due ${short}`, color: T.inkSoft };
+}
+function deadlineSortKey(t) {
+  const d = isoToLocalDate(t.due_date);
+  return d ? d.getTime() : Number.MAX_SAFE_INTEGER; // tasks without a deadline go last
+}
+function DeadlineTag({ info }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, color: info.color, background: `${info.color}15`, padding: "3px 8px", borderRadius: 8 }}>
+      <CalendarIcon size={11} /> {info.label}
+    </span>
+  );
+}
+function NoticeBanner({ kind, message }) {
+  if (!message) return null;
+  if (kind === "error") return <ErrorBanner message={message} />;
+  return (
+    <div className="orbit-pop-in" style={{ display: "flex", gap: 8, alignItems: "flex-start", background: T.primarySoft, border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, fontSize: 12.5, color: T.ink }}>
+      <Check size={16} color={T.primary} style={{ flexShrink: 0, marginTop: 1 }} />
+      {message}
+    </div>
+  );
+}
+
 function FieldLabel({ children, icon: Icon }) {
   return <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, color: T.inkSoft, marginBottom: 8 }}>{Icon && <Icon size={13} />}{children}</div>;
 }
@@ -332,7 +375,7 @@ This is a summary for in-app display. The full Terms of Service document governs
   },
   privacy: {
     title: "Privacy Policy",
-    body: `Last updated: October 4, 2026
+    body: `Last updated: October 17, 2026
 
 This explains what Orbit collects and how we use it. The data controller for Orbit is the operator of this service, contactable at ryecellz23@gmail.com.
 
@@ -359,6 +402,10 @@ We use the following third-party services to operate Orbit:
 - Vercel — frontend static hosting (no user data)
 - Anthropic — AI image analysis (images you actively upload)
 - Resend — transactional email, if configured (your email address and the content of verification/reset emails)
+- Google — Google Calendar, only if you choose to connect it (see "Google Calendar sync" below)
+
+# Google Calendar sync (optional)
+If you connect Google Calendar, Orbit asks Google for permission to add, change and delete events on your Google Calendar, and nothing else. When you add, edit or delete an event in Orbit, its title, description and times are sent to your own Google Calendar. Orbit does not read your other Google events. We store your Google email address and an encrypted access token so we can keep syncing; we never see your Google password. Orbit's use of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements. You can disconnect any time in Profile → Connections, which revokes Orbit's access; events already copied to Google stay in your Google Calendar, and you can also remove Orbit's access at myaccount.google.com/permissions. Deleting your Orbit account disconnects Google automatically.
 
 # Data retention
 Your account and content are retained while your account is active. When you delete your account, we immediately revoke all sessions, erase your content (folders, notes, tasks, reminders, events, study history) and anonymize your identifiers (username, email, name), then hard-delete the underlying record after a 30-day grace period, after which no personal data remains. Group messages you've posted remain visible to other group members, attributed to your display name — they are part of the group's shared history and are not removed by account deletion.
@@ -1233,7 +1280,7 @@ function CaptureScreen({ back, onSave, folders }) {
   );
 }
 
-function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
+function CalendarScreen({ back, events, onAddEvent, onDeleteEvent, google, onConnectGoogle, onSyncGoogle }) {
   const [month, setMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
   const [selected, setSelected] = useState(() => new Date());
   const [showForm, setShowForm] = useState(false);
@@ -1254,6 +1301,7 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
   const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const cells = [...Array(startOffset).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => new Date(month.getFullYear(), month.getMonth(), i + 1))];
   const today = new Date();
+  const pendingSync = events.filter((ev) => !ev.synced_to_google && new Date(ev.start_time) >= new Date(Date.now() - 86400000)).length;
   const dayEvents = (eventsByDay[dayKey(selected)] || []).sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
 
   function shiftMonth(delta) {
@@ -1320,6 +1368,7 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
         </div>
 
        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <GoogleSyncBar google={google} pending={pendingSync} onConnect={onConnectGoogle} onSync={onSyncGoogle} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>{selected.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</div>
           <span onClick={openForm} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 700, color: T.primary, cursor: "pointer" }}><Plus size={14} /> Add event</span>
@@ -1336,6 +1385,9 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
                 {ev.end_time && ` – ${new Date(ev.end_time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`}
               </div>
             </div>
+            {google && google.connected && !google.needs_reauth && ev.synced_to_google && (
+              <span title="Also in your Google Calendar" style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10.5, fontWeight: 700, color: T.primary, background: T.primarySoft, padding: "3px 7px", borderRadius: 7 }}><Check size={11} /> Google</span>
+            )}
             <X size={15} color={T.inkFaint} style={{ cursor: "pointer" }} onClick={() => onDeleteEvent(ev.id)} />
           </div>
         ))}
@@ -1363,10 +1415,11 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent }) {
   );
 }
 
-function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onDelete }) {
+function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onSetDueDate, onDelete }) {
   const [filter, setFilter] = useState("All");
-  const [sort, setSort] = useState("Newest"); // "Newest" | "Priority"
+  const [sort, setSort] = useState("Newest"); // "Newest" | "Priority" | "Deadline"
   const [draft, setDraft] = useState("");
+  const [draftDue, setDraftDue] = useState("");
   const [draftPriority, setDraftPriority] = useState("Medium");
   const [openId, setOpenId] = useState(null); // task whose priority picker is showing
   const [confirmId, setConfirmId] = useState(null); // task waiting for a second tap to delete
@@ -1382,12 +1435,16 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onDelete }) {
   const visible = sort === "Priority"
     ? // stable sort: finished tasks sink, then High → Medium → Low; ties keep their current order
       [...filtered].sort((x, y) => Number(x.done) - Number(y.done) || PRIORITY_LEVELS.indexOf(x.priority) - PRIORITY_LEVELS.indexOf(y.priority))
+    : sort === "Deadline"
+    ? // finished tasks sink, then soonest deadline first, tasks with no deadline last
+      [...filtered].sort((x, y) => Number(x.done) - Number(y.done) || deadlineSortKey(x) - deadlineSortKey(y))
     : filtered;
 
   async function addTask() {
     if (!draft.trim()) return;
-    await onAdd(draft.trim(), draftPriority);
+    await onAdd(draft.trim(), draftPriority, draftDue);
     setDraft("");
+    setDraftDue("");
   }
 
   const pill = (active) => ({ border: `1px solid ${active ? T.ink : T.line}`, borderRadius: 999, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", background: active ? T.ink : T.panel, color: active ? "#fff" : T.inkSoft });
@@ -1401,9 +1458,10 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onDelete }) {
             <button key={f} onClick={() => setFilter(f)} style={pill(filter === f)}>{f}</button>
           ))}
           <span style={{ flex: 1 }} />
-          <button onClick={() => setSort((s) => (s === "Priority" ? "Newest" : "Priority"))} style={pill(sort === "Priority")} title="Show the most urgent tasks first">
-            {sort === "Priority" ? "Sorted by priority" : "Sort by priority"}
-          </button>
+          <span style={{ fontSize: 12, fontWeight: 700, color: T.inkFaint }}>Sort</span>
+          {[["Newest", "Newest"], ["Priority", "Priority"], ["Deadline", "Deadline"]].map(([key, label]) => (
+            <button key={key} onClick={() => setSort(key)} style={pill(sort === key)}>{label}</button>
+          ))}
         </div>
         {tasks.length === 0 && (
           <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6, padding: "26px 16px" }}>
@@ -1418,20 +1476,42 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onDelete }) {
               <span key={String(t.done)} className={t.done ? "orbit-pop" : undefined} style={{ cursor: "pointer", display: "flex" }}>{t.done ? <CheckSquare size={20} color={T.primary} /> : <Square size={20} color={T.inkFaint} />}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: t.done ? T.inkFaint : T.ink, textDecoration: t.done ? "line-through" : "none", overflowWrap: "anywhere" }}>{t.text}</div>
+                {(() => {
+                  const info = deadlineInfo(t.due_date, t.done);
+                  return info ? (
+                    <button onClick={(e) => { e.stopPropagation(); setOpenId((id) => (id === t.id ? null : t.id)); }} aria-label="Change deadline" title="Change deadline" style={{ background: "none", border: "none", padding: 0, marginTop: 5, cursor: "pointer", display: "block" }}>
+                      <DeadlineTag info={info} />
+                    </button>
+                  ) : null;
+                })()}
                 {openId === t.id && (
                   <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
                     <PriorityChips
                       size="sm"
                       value={t.priority}
-                      onChange={(level) => { setOpenId(null); if (level !== t.priority) onSetPriority(t, level); }}
+                      onChange={(level) => { if (level !== t.priority) onSetPriority(t, level); }}
                     />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 700, color: T.inkSoft }}>Deadline</span>
+                      <input
+                        type="date"
+                        value={t.due_date || ""}
+                        onChange={(e) => onSetDueDate(t, e.target.value)}
+                        aria-label="Task deadline"
+                        style={{ ...inputStyle, width: "auto", padding: "5px 9px", fontSize: 12.5, borderRadius: 10 }}
+                      />
+                      {t.due_date && (
+                        <button onClick={() => onSetDueDate(t, "")} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, color: T.inkSoft, padding: 0 }}>Clear</button>
+                      )}
+                      <button onClick={() => setOpenId(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, color: T.primary, padding: 0, marginLeft: "auto" }}>Done</button>
+                    </div>
                   </div>
                 )}
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); setOpenId((id) => (id === t.id ? null : t.id)); }}
-                aria-label={`Priority ${t.priority} — tap to change`}
-                title="Change priority"
+                aria-label={`Priority ${t.priority} — tap to change priority or deadline`}
+                title="Change priority or deadline"
                 style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
               >
                 <PriorityTag p={t.priority} />
@@ -1458,6 +1538,11 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onDelete }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>Priority</span>
             <PriorityChips value={draftPriority} onChange={setDraftPriority} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>Deadline <span style={{ fontWeight: 500, color: T.inkFaint }}>(optional)</span></span>
+            <input type="date" value={draftDue} onChange={(e) => setDraftDue(e.target.value)} aria-label="New task deadline" style={{ ...inputStyle, width: "auto", padding: "7px 11px", fontSize: 13, borderRadius: 11 }} />
+            {draftDue && <button onClick={() => setDraftDue("")} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, color: T.inkSoft, padding: 0 }}>Clear</button>}
           </div>
         </div>
       </div>
@@ -2075,7 +2160,44 @@ const studyApi = {
   remove: (id) => accountRequest(`/study-sessions/${id}`, { method: "DELETE" }),
 };
 
-function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
+// Google Calendar sync (kept here so api.js doesn't need changes).
+const googleApi = {
+  status: () => accountRequest("/integrations/google").then((r) => r.json()),
+  connect: () => {
+    let timezone = null;
+    try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { /* old browser */ }
+    return accountRequest("/integrations/google/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timezone }) }).then((r) => r.json());
+  },
+  syncNow: () => accountRequest("/integrations/google/sync", { method: "POST" }).then((r) => r.json()),
+  disconnect: () => accountRequest("/integrations/google", { method: "DELETE" }),
+};
+
+function GoogleSyncBar({ google, pending, onConnect, onSync }) {
+  const [busy, setBusy] = useState(false);
+  if (!google || !google.configured) return null; // hidden until the server has Google set up
+  const run = async (fn) => { setBusy(true); try { await fn(); } finally { setBusy(false); } };
+  const link = { background: "none", border: "none", cursor: busy ? "default" : "pointer", fontSize: 12.5, fontWeight: 700, color: T.primary, padding: 0, opacity: busy ? 0.6 : 1 };
+  let text; let action = null;
+  if (google.connected && google.needs_reauth) {
+    text = "Google Calendar needs to be reconnected."; action = <button disabled={busy} onClick={() => run(onConnect)} style={link}>Reconnect</button>;
+  } else if (google.connected) {
+    text = `Events sync to Google Calendar${google.email ? ` (${google.email})` : ""}.`;
+    if (pending > 0) action = <button disabled={busy} onClick={() => run(onSync)} style={link}>{busy ? "Syncing…" : `Sync ${pending} now`}</button>;
+  } else {
+    text = "Show your Orbit events in Google Calendar too."; action = <button disabled={busy} onClick={() => run(onConnect)} style={link}>Connect</button>;
+  }
+  return (
+    <div className="orbit-card" style={{ ...rowCardStyle, gap: 10, padding: "10px 14px" }}>
+      <CalendarIcon size={16} color={google.connected && !google.needs_reauth ? T.primary : T.inkFaint} />
+      <div style={{ flex: 1, fontSize: 12.5, color: T.inkSoft, minWidth: 0, overflowWrap: "anywhere" }}>{text}</div>
+      {action}
+    </div>
+  );
+}
+
+function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGoogle, onDisconnectGoogle }) {
+  const [confirmGoogleOff, setConfirmGoogleOff] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [emailInput, setEmailInput] = useState("");
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState("");
@@ -2254,6 +2376,39 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate }) {
           <div style={{ fontSize: 13.5, color: T.ink }}>Privacy Policy</div>
         </div>
 
+        {google && google.configured && (
+          <>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 10 }}>Connections</div>
+            <div className="orbit-card" style={rowCardStyle}>
+              <CalendarIcon size={17} color={T.inkSoft} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, color: T.ink }}>Google Calendar</div>
+                <div style={{ fontSize: 11.5, color: T.inkFaint, overflowWrap: "anywhere" }}>
+                  {google.connected
+                    ? (google.needs_reauth ? "Connection expired — reconnect to keep syncing" : `Connected${google.email ? ` as ${google.email}` : ""} · events you add in Orbit appear there`)
+                    : "Send the events you add in Orbit to your Google Calendar"}
+                </div>
+              </div>
+              {(!google.connected || google.needs_reauth) && (
+                <button disabled={googleBusy} onClick={async () => { setGoogleBusy(true); try { await onConnectGoogle(); } finally { setGoogleBusy(false); } }} style={{ ...secondaryBtn, padding: "7px 14px", opacity: googleBusy ? 0.6 : 1 }}>
+                  {google.needs_reauth ? "Reconnect" : "Connect"}
+                </button>
+              )}
+              {google.connected && !google.needs_reauth && (
+                <button
+                  disabled={googleBusy}
+                  onClick={async () => {
+                    if (!confirmGoogleOff) { setConfirmGoogleOff(true); setTimeout(() => setConfirmGoogleOff(false), 3000); return; }
+                    setConfirmGoogleOff(false); setGoogleBusy(true);
+                    try { await onDisconnectGoogle(); } finally { setGoogleBusy(false); }
+                  }}
+                  style={{ ...secondaryBtn, padding: "7px 14px", color: confirmGoogleOff ? "#fff" : T.danger, background: confirmGoogleOff ? T.danger : undefined, border: confirmGoogleOff ? "none" : undefined, opacity: googleBusy ? 0.6 : 1 }}
+                >{confirmGoogleOff ? "Disconnect?" : "Disconnect"}</button>
+              )}
+            </div>
+          </>
+        )}
+
         <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 10 }}>Your data</div>
         <div onClick={exporting ? undefined : exportData} className="orbit-card" style={{ ...rowCardStyle, cursor: exporting ? "default" : "pointer", opacity: exporting ? 0.6 : 1 }}>
           {exporting ? <Loader2 size={17} color={T.inkSoft} style={{ animation: "spin 1s linear infinite" }} /> : <Download size={17} color={T.inkSoft} />}
@@ -2353,6 +2508,8 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   const [error, setError] = useState("");
   const isDesktop = useIsDesktop();
   const [inviteNotice, setInviteNotice] = useState("");
+  const [google, setGoogle] = useState(null); // null until loaded; {configured, connected, needs_reauth, email}
+  const [googleNotice, setGoogleNotice] = useState(null); // {kind: "ok" | "error", text}
   const joinTriedRef = useRef(false);
 
   useEffect(() => {
@@ -2444,8 +2601,8 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
   }
 
-  async function addTask(text, priority = "Medium") {
-    const created = await api.tasks.create({ text, priority, due_date: "" });
+  async function addTask(text, priority = "Medium", dueDate = "") {
+    const created = await api.tasks.create({ text, priority, due_date: dueDate || "" });
     setTasks((prev) => [created, ...prev]);
   }
 
@@ -2470,6 +2627,17 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     }
   }
 
+  async function setTaskDueDate(task, due_date) {
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, due_date } : t))); // optimistic
+    try {
+      const updated = await api.tasks.update(task.id, { due_date });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    } catch (err) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, due_date: task.due_date } : t)));
+      setInviteNotice(err.message || "Couldn't change that task's deadline.");
+    }
+  }
+
   async function addReminder(title) {
     const created = await api.reminders.create({ title, detail: "", kind: "time" });
     setReminders((prev) => [created, ...prev]);
@@ -2478,7 +2646,67 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   async function addEvent(payload) {
     const created = await api.events.create(payload);
     setEvents((prev) => [...prev, created]);
+    if (google && google.connected) refreshGoogle(); // a failed push can flag the connection as expired
   }
+
+  async function refreshGoogle() {
+    try { setGoogle(await googleApi.status()); } catch { /* optional feature — stay quiet */ }
+  }
+
+  async function connectGoogle() {
+    try {
+      const { url } = await googleApi.connect();
+      window.location.assign(url); // off to Google's consent screen; it returns here with ?google=…
+    } catch (err) {
+      setGoogleNotice({ kind: "error", text: err.message || "Couldn't start the Google connection." });
+    }
+  }
+
+  async function syncGoogleNow() {
+    try {
+      const r = await googleApi.syncNow();
+      setEvents(await api.events.list());
+      await refreshGoogle();
+      setGoogleNotice(r.needs_reauth
+        ? { kind: "error", text: "Google needs to be reconnected." }
+        : { kind: r.synced < r.attempted ? "error" : "ok", text: r.attempted === 0 ? "Everything is already in Google Calendar." : `${r.synced} of ${r.attempted} events sent to Google Calendar.` });
+    } catch (err) {
+      setGoogleNotice({ kind: "error", text: err.message || "Couldn't sync with Google." });
+    }
+  }
+
+  async function disconnectGoogle() {
+    try {
+      await googleApi.disconnect();
+      setEvents((prev) => prev.map((e) => ({ ...e, synced_to_google: false })));
+      await refreshGoogle();
+      setGoogleNotice({ kind: "ok", text: "Google Calendar disconnected. Events already copied there stay in your Google Calendar." });
+    } catch (err) {
+      setGoogleNotice({ kind: "error", text: err.message || "Couldn't disconnect Google." });
+    }
+  }
+
+  // Load Google status once, and handle the return trip from Google's consent screen.
+  useEffect(() => {
+    let params;
+    try { params = new URLSearchParams(window.location.search); } catch { params = null; }
+    const result = params && params.get("google");
+    if (result) {
+      params.delete("google");
+      const qs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+    }
+    (async () => {
+      await refreshGoogle();
+      if (result === "connected") {
+        setScreen("calendar");
+        await syncGoogleNow(); // send events made before connecting (also refreshes status + events)
+      } else if (result === "cancelled") setGoogleNotice({ kind: "error", text: "Google connection was cancelled." });
+      else if (result === "denied") setGoogleNotice({ kind: "error", text: "Calendar permission wasn't granted. Tick the calendar box on Google's screen to turn sync on." });
+      else if (result) setGoogleNotice({ kind: "error", text: "Couldn't connect Google Calendar. Please try again." });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function deleteEvent(id) {
     await api.events.delete(id);
@@ -2537,8 +2765,8 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
       case "archive": return <ArchiveScreen folderList={folderList} go={go} onCreate={createFolder} onUpdate={updateFolder} onDelete={deleteFolder} onMove={moveFolder} />;
       case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} onUpdate={updateFolder} onDelete={deleteFolder} />;
       case "capture": return <CaptureScreen back={() => setScreen("home")} onSave={saveItem} folders={folders} />;
-      case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} />;
-      case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} onSetPriority={setTaskPriority} onDelete={deleteTask} />;
+      case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} google={google} onConnectGoogle={connectGoogle} onSyncGoogle={syncGoogleNow} />;
+      case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} onSetPriority={setTaskPriority} onSetDueDate={setTaskDueDate} onDelete={deleteTask} />;
       case "groupslist":
         return isDesktop
           ? <GroupsWorkspace groups={groups} activeGroup={activeGroup} user={user} go={go} onCreate={createGroup} onJoin={joinGroup} />
@@ -2550,7 +2778,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
           : <CenterSpinner label="Loading group…" />;
       case "insights": return <InsightsScreen back={() => setScreen("home")} tasks={tasks} studySessions={studySessions} onLogSession={logStudySession} onRenameSession={renameStudySession} onDeleteSession={deleteStudySession} />;
       case "reminders": return <RemindersScreen back={() => setScreen("home")} reminders={reminders} onAdd={addReminder} />;
-      case "profile": return <ProfileScreen back={() => setScreen("home")} user={user} onLogout={onLogout} onUserUpdate={onUserUpdate} />;
+      case "profile": return <ProfileScreen back={() => setScreen("home")} user={user} onLogout={onLogout} onUserUpdate={onUserUpdate} google={google} onConnectGoogle={connectGoogle} onDisconnectGoogle={disconnectGoogle} />;
       default: return null;
     }
   }
@@ -2576,6 +2804,12 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
             <div style={{ margin: "12px 20px 0" }}>
               <ErrorBanner message={inviteNotice} />
               <div onClick={() => setInviteNotice("")} style={{ fontSize: 12, fontWeight: 700, color: T.inkSoft, cursor: "pointer", marginTop: 4 }}>Dismiss</div>
+            </div>
+          )}
+          {googleNotice && (
+            <div style={{ margin: "12px 20px 0" }}>
+              <NoticeBanner kind={googleNotice.kind} message={googleNotice.text} />
+              <div onClick={() => setGoogleNotice(null)} style={{ fontSize: 12, fontWeight: 700, color: T.inkSoft, cursor: "pointer", marginTop: 4 }}>Dismiss</div>
             </div>
           )}
           <div key={screen} className={["archive", "folder", "home", "todo", "reminders", "calendar", "groupslist", "group", "capture", "insights"].includes(screen) ? "orbit-page" : "orbit-page orbit-narrow"} >{renderScreen()}</div>
@@ -2725,11 +2959,36 @@ function GlobalStyles() {
 
 /* ----------------------------------- APP --------------------------------------- */
 
+// Public, no-login pages at /privacy and /terms — Google's OAuth consent screen
+// (and anyone else) needs a plain URL for these, not an in-app popup.
+function LegalPage({ type }) {
+  const doc = LEGAL_CONTENT[type];
+  return (
+    <div style={{ minHeight: "100vh", background: T.bg, padding: "32px 20px 56px", boxSizing: "border-box" }}>
+      <div style={{ maxWidth: 720, margin: "0 auto" }}>
+        <a href="/" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: T.primary, textDecoration: "none", marginBottom: 18 }}>
+          <ArrowLeft size={15} /> Back to Orbit
+        </a>
+        <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 22, padding: "22px 26px 28px", boxShadow: T.shadow }}>
+          <h1 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, letterSpacing: -0.5, color: T.ink }}>{doc.title}</h1>
+          {renderLegalText(doc.body)}
+        </div>
+        <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 18, fontSize: 12.5 }}>
+          <a href="/privacy" style={{ color: T.inkSoft }}>Privacy Policy</a>
+          <a href="/terms" style={{ color: T.inkSoft }}>Terms of Service</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const path = (typeof window !== "undefined" ? window.location.pathname : "/").replace(/\/+$/, "").toLowerCase();
+  const legalType = path === "/privacy" ? "privacy" : path === "/terms" ? "terms" : null;
   return (
     <>
       <GlobalStyles />
-      <AppInner />
+      {legalType ? <LegalPage type={legalType} /> : <AppInner />}
     </>
   );
 }

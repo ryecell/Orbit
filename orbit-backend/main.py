@@ -8,7 +8,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 import auth
+import google_calendar
 import models
 import schemas
 from database import Base, SessionLocal, engine, get_db
@@ -561,6 +562,7 @@ def create_event(payload: schemas.EventCreate, db: Session = Depends(get_db), us
     db.add(event)
     db.commit()
     db.refresh(event)
+    _push_event_to_google(db, user.id, event)
     return event
 
 
@@ -573,6 +575,7 @@ def update_event(event_id: str, payload: schemas.EventUpdate, db: Session = Depe
         setattr(event, field, value)
     db.commit()
     db.refresh(event)
+    _push_event_to_google(db, user.id, event)
     return event
 
 
@@ -581,7 +584,202 @@ def delete_event(event_id: str, db: Session = Depends(get_db), user: models.User
     event = db.query(models.Event).filter(models.Event.id == event_id, models.Event.owner_id == user.id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
+    google_event_id = event.google_event_id
     db.delete(event)
+    db.commit()
+    if google_event_id:
+        _remove_event_from_google(db, user.id, google_event_id)
+
+
+# ============================== GOOGLE CALENDAR SYNC ==============================
+
+GOOGLE_STATE_MINUTES = 10
+
+
+def _google_conn(db: Session, user_id: str):
+    return db.query(models.GoogleConnection).filter(models.GoogleConnection.user_id == user_id).first()
+
+
+def _push_event_to_google(db: Session, user_id: str, event: models.Event) -> None:
+    """Best-effort: a Google hiccup must never make saving an Orbit event fail."""
+    if not google_calendar.is_configured():
+        return
+    conn = _google_conn(db, user_id)
+    if not conn or conn.needs_reauth:
+        return
+    try:
+        gid = google_calendar.upsert_event(conn, event)
+        if event.google_event_id != gid:
+            event.google_event_id = gid
+            db.commit()
+            db.refresh(event)
+    except google_calendar.GoogleAuthError:
+        conn.needs_reauth = True
+        google_calendar.forget_access_token(user_id)
+        db.commit()
+        logger.warning("Google connection needs reauthorization (user %s)", user_id)
+    except Exception:
+        db.rollback()
+        logger.exception("Could not push event to Google Calendar")
+
+
+def _remove_event_from_google(db: Session, user_id: str, google_event_id: str) -> None:
+    if not google_calendar.is_configured():
+        return
+    conn = _google_conn(db, user_id)
+    if not conn or conn.needs_reauth:
+        return
+    try:
+        google_calendar.delete_event(conn, google_event_id)
+    except google_calendar.GoogleAuthError:
+        conn.needs_reauth = True
+        google_calendar.forget_access_token(user_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Could not delete event from Google Calendar")
+
+
+@app.get("/integrations/google")
+def google_status(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    if not google_calendar.is_configured():
+        return {"configured": False, "connected": False, "needs_reauth": False, "email": None}
+    conn = _google_conn(db, user.id)
+    return {
+        "configured": True,
+        "connected": bool(conn),
+        "needs_reauth": bool(conn and conn.needs_reauth),
+        "email": conn.google_email if conn else None,
+    }
+
+
+@app.post("/integrations/google/connect")
+@limiter.limit("10/minute")
+def google_connect(
+    request: Request,
+    payload: schemas.GoogleConnectRequest,
+    user: models.User = Depends(auth.get_current_user),
+):
+    """Returns the Google consent-screen URL. The frontend sends the browser there."""
+    if not google_calendar.is_configured():
+        raise HTTPException(status_code=503, detail="Google Calendar sync isn't set up on this server yet.")
+    state = auth.jwt.encode(
+        {
+            # "uid", deliberately not "sub": this token must never work as a login token.
+            "uid": user.id,
+            "purpose": "google-calendar",
+            "tz": google_calendar.valid_timezone(payload.timezone),
+            "exp": datetime.utcnow() + timedelta(minutes=GOOGLE_STATE_MINUTES),
+        },
+        auth.SECRET_KEY,
+        algorithm=auth.ALGORITHM,
+    )
+    return {"url": google_calendar.build_auth_url(state)}
+
+
+@app.get("/integrations/google/callback")
+@limiter.limit("20/minute")
+def google_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Google sends the browser back here. There's no Orbit login header on this
+    request, so the signed `state` (made in /connect) is what proves who it's for."""
+    frontend = os.environ.get("ORBIT_PUBLIC_FRONTEND_URL", "http://localhost:5173").rstrip("/")
+
+    def back(result: str):
+        return RedirectResponse(f"{frontend}/?google={result}", status_code=303)
+
+    if error or not code or not state:
+        return back("cancelled")
+    try:
+        claims = auth.jwt.decode(state, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
+        if claims.get("purpose") != "google-calendar" or not claims.get("uid"):
+            return back("error")
+    except Exception:
+        return back("error")
+
+    user = db.query(models.User).filter(models.User.id == claims["uid"], models.User.deleted_at.is_(None)).first()
+    if not user or not google_calendar.is_configured():
+        return back("error")
+
+    try:
+        result = google_calendar.exchange_code(code)
+    except google_calendar.GoogleError:
+        return back("error")
+    if google_calendar.CALENDAR_SCOPE not in (result["scope"] or "").split():
+        return back("denied")  # they unticked the calendar permission on Google's screen
+    if not result["refresh_token"]:
+        return back("error")
+
+    conn = _google_conn(db, user.id)
+    if conn:
+        conn.refresh_token_enc = google_calendar.encrypt(result["refresh_token"])
+        conn.google_email = result["email"]
+        conn.timezone = claims.get("tz", "UTC")
+        conn.needs_reauth = False
+    else:
+        db.add(models.GoogleConnection(
+            user_id=user.id,
+            refresh_token_enc=google_calendar.encrypt(result["refresh_token"]),
+            google_email=result["email"],
+            timezone=claims.get("tz", "UTC"),
+        ))
+    db.commit()
+    google_calendar.forget_access_token(user.id)
+    logger.info("Google Calendar connected (user %s)", user.id)
+    return back("connected")
+
+
+@app.post("/integrations/google/sync")
+@limiter.limit("5/minute")
+def google_sync_existing(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    """Pushes upcoming Orbit events that aren't in Google yet (e.g. ones made before connecting)."""
+    conn = _google_conn(db, user.id)
+    if not google_calendar.is_configured() or not conn:
+        raise HTTPException(status_code=400, detail="Connect Google Calendar first.")
+    if conn.needs_reauth:
+        raise HTTPException(status_code=409, detail="Google needs to be reconnected.")
+    pending = (
+        db.query(models.Event)
+        .filter(
+            models.Event.owner_id == user.id,
+            models.Event.google_event_id.is_(None),
+            models.Event.start_time >= datetime.utcnow() - timedelta(days=1),
+        )
+        .order_by(models.Event.start_time.asc())
+        .limit(50)
+        .all()
+    )
+    synced = 0
+    for ev in pending:
+        _push_event_to_google(db, user.id, ev)
+        if ev.google_event_id:
+            synced += 1
+        if conn.needs_reauth:
+            break
+    return {"synced": synced, "attempted": len(pending), "needs_reauth": bool(conn.needs_reauth)}
+
+
+@app.delete("/integrations/google", status_code=status.HTTP_204_NO_CONTENT)
+def google_disconnect(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    """Disconnects. Events already copied to Google stay there — they're the person's."""
+    conn = _google_conn(db, user.id)
+    if not conn:
+        return
+    google_calendar.revoke(conn.refresh_token_enc)
+    google_calendar.forget_access_token(user.id)
+    db.delete(conn)
+    db.query(models.Event).filter(models.Event.owner_id == user.id).update(
+        {"google_event_id": None}, synchronize_session=False
+    )
     db.commit()
 
 
@@ -865,6 +1063,11 @@ def _erase_user_data(db: Session, user: models.User) -> None:
     folder_ids = [r[0] for r in db.query(models.Folder.id).filter(models.Folder.owner_id == user.id).all()]
     if folder_ids:
         db.query(models.Item).filter(models.Item.folder_id.in_(folder_ids)).delete(synchronize_session=False)
+    conn = db.query(models.GoogleConnection).filter(models.GoogleConnection.user_id == user.id).first()
+    if conn:
+        google_calendar.revoke(conn.refresh_token_enc)  # best-effort; never raises
+        google_calendar.forget_access_token(user.id)
+        db.delete(conn)
     for model in (models.Folder, models.Task, models.Reminder, models.Event, models.StudySession):
         db.query(model).filter(model.owner_id == user.id).delete(synchronize_session=False)
 

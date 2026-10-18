@@ -155,8 +155,34 @@ class Event(Base):
     end_time = Column(DateTime, nullable=True)
     color = Column(String, default="#5B3FE0")
     owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # Id of the matching event in the person's Google Calendar (set once it has
+    # been pushed there; NULL if they haven't connected Google or a push failed).
+    google_event_id = Column(String, nullable=True)
 
     owner = relationship("User", back_populates="events")
+
+    @property
+    def synced_to_google(self) -> bool:
+        return bool(self.google_event_id)
+
+
+class GoogleConnection(Base):
+    """
+    A person's link to their Google Calendar. Only the long-lived refresh token
+    is stored, and only encrypted (see google_calendar.encrypt) — never in plain text.
+    """
+    __tablename__ = "google_connections"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    refresh_token_enc = Column(String, nullable=False)
+    google_email = Column(String, nullable=True)
+    # IANA zone (e.g. "Asia/Manila") that Orbit's wall-clock event times are in.
+    timezone = Column(String, nullable=False, default="UTC")
+    # True once Google rejected the refresh token (revoked / expired) — the
+    # person has to reconnect before anything syncs again.
+    needs_reauth = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class StudySession(Base):

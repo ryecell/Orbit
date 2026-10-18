@@ -24,3 +24,6 @@ redis==5.0.8
 
 # Error monitoring — only activates if SENTRY_DSN is set.
 sentry-sdk[fastapi]==2.14.0
+
+# Encrypts stored Google refresh tokens (already installed via python-jose[cryptography]).
+cryptography
