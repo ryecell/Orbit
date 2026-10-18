@@ -3,7 +3,7 @@ import {
   Home, FolderOpen, Plus, Users, User, Search, Bell, Camera, Calendar as CalendarIcon,
   ChevronLeft, ChevronRight, CheckSquare, Square, Clock, MapPin, TrendingUp, Sparkles,
   Send, X, Check, ArrowLeft, Shield, Zap, Star, Atom, Sigma, Wrench, FileText,
-  Wifi, Mic, ListTodo, BarChart3, ChevronDown, AlertCircle, Loader2,
+  Wifi, Mic, ListTodo, BarChart3, ChevronDown, AlertCircle,
   Leaf, Paperclip, Lock, LayoutGrid, Layers, LogOut, Mail, KeyRound, Download, Trash2, Copy, Share2,
   BookOpen, FlaskConical, Code, Calculator, Lightbulb, GraduationCap, Globe, Palette, Music, Heart, Briefcase,
   Pencil, ChevronUp
@@ -216,6 +216,17 @@ function ErrorBanner({ message }) {
   );
 }
 
+// Small inline version of the loader (a core with a moon circling it) for
+// buttons and status lines. Takes the surrounding text colour unless one is given.
+function OrbitSpinner({ size = 16, color }) {
+  return (
+    <span className="orbit-mini" role="status" aria-label="Loading" style={{ width: size, height: size, color: color || "currentColor" }}>
+      <span className="orbit-mini-core" />
+      <span className="orbit-mini-ring"><span className="orbit-mini-moon" /></span>
+    </span>
+  );
+}
+
 // Orbiting-planet loader. The free hosting tier sleeps when idle, so the very
 // first request after a quiet spell can take a while — after a few seconds the
 // loader says so instead of leaving people staring at a spinner.
@@ -321,6 +332,14 @@ function DeadlineTag({ info }) {
 function NoticeBanner({ kind, message }) {
   if (!message) return null;
   if (kind === "error") return <ErrorBanner message={message} />;
+  if (kind === "loading") {
+    return (
+      <div className="orbit-pop-in" style={{ display: "flex", gap: 10, alignItems: "center", background: T.primarySoft, border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, fontSize: 12.5, color: T.ink }}>
+        <OrbitSpinner size={16} color={T.primary} />
+        {message}
+      </div>
+    );
+  }
   return (
     <div className="orbit-pop-in" style={{ display: "flex", gap: 8, alignItems: "flex-start", background: T.primarySoft, border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, fontSize: 12.5, color: T.ink }}>
       <Check size={16} color={T.primary} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -671,7 +690,7 @@ function AuthScreen({ onAuthed }) {
             {success ? (
               <span className="orbit-pop" style={{ display: "flex", alignItems: "center", gap: 8 }}><Check size={17} /> {mode === "login" ? "Welcome back!" : "You're in!"}</span>
             ) : loading ? (
-              <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> {mode === "login" ? "Signing in…" : mode === "register" ? "Creating account…" : "Sending…"}</>
+              <><OrbitSpinner size={16} /> {mode === "login" ? "Signing in…" : mode === "register" ? "Creating account…" : "Sending…"}</>
             ) : (mode === "login" ? "Sign in" : mode === "register" ? "Create account" : "Send reset link")}
           </button>
         </form>
@@ -760,7 +779,7 @@ function ResetPasswordScreen({ token, onDone }) {
             </div>
             <ErrorBanner message={error} />
             <button type="submit" disabled={loading} style={{ ...primaryBtn, opacity: loading ? 0.6 : 1, marginTop: 6 }}>
-              {loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Update password"}
+              {loading ? <OrbitSpinner size={16} /> : "Update password"}
             </button>
           </form>
         </>
@@ -832,14 +851,14 @@ function VerifyPendingScreen({ user, onVerified, onLogout }) {
       <p style={{ fontSize: 14, fontWeight: 700, color: T.ink, margin: "0 0 22px" }}>{user.email}</p>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, color: T.inkFaint, fontSize: 12.5, marginBottom: 26 }}>
-        <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} />
+        <OrbitSpinner size={15} />
         Waiting for confirmation…
       </div>
 
       {error && <div style={{ width: "100%", marginBottom: 14 }}><ErrorBanner message={error} /></div>}
 
       <button onClick={checkNow} disabled={checking} style={{ ...primaryBtn, width: "100%", opacity: checking ? 0.6 : 1 }}>
-        {checking ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "I've verified — check now"}
+        {checking ? <OrbitSpinner size={16} /> : "I've verified — check now"}
       </button>
 
       <button onClick={resend} disabled={resendState === "sending"} style={{ ...secondaryBtn, width: "100%", marginTop: 10, opacity: resendState === "sending" ? 0.6 : 1 }}>
@@ -1024,7 +1043,7 @@ function FolderEditorModal({ folder, onClose, onSave, onDelete }) {
           <ErrorBanner message={error} />
 
           <button onClick={save} disabled={busy || !name.trim()} style={{ ...primaryBtn, opacity: busy || !name.trim() ? 0.6 : 1 }}>
-            {busy && !confirmDelete ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : editing ? "Save changes" : "Create folder"}
+            {busy && !confirmDelete ? <OrbitSpinner size={16} /> : editing ? "Save changes" : "Create folder"}
           </button>
 
           {editing && onDelete && (
@@ -1036,7 +1055,7 @@ function FolderEditorModal({ folder, onClose, onSave, onDelete }) {
                 <div style={{ display: "flex", gap: 10 }}>
                   <button type="button" disabled={busy} onClick={() => setConfirmDelete(false)} style={{ ...secondaryBtn, flex: 1 }}>Keep it</button>
                   <button type="button" disabled={busy} onClick={remove} style={{ ...secondaryBtn, flex: 1, background: T.danger, color: "#fff", border: "none" }}>
-                    {busy ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : "Delete"}
+                    {busy ? <OrbitSpinner size={15} /> : "Delete"}
                   </button>
                 </div>
               </div>
@@ -1245,7 +1264,7 @@ function CaptureScreen({ back, onSave, folders }) {
 
         {status === "loading" && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, color: T.inkSoft, fontSize: 13.5, padding: "6px 2px" }}>
-            <Loader2 size={16} color={T.primary} style={{ animation: "spin 1s linear infinite" }} /> Analyzing image with AI…
+            <OrbitSpinner size={16} color={T.primary} /> Analyzing image with AI…
           </div>
         )}
 
@@ -1288,7 +1307,7 @@ function CaptureScreen({ back, onSave, folders }) {
             </div>
 
             <button onClick={save} disabled={!title.trim() || saving} style={{ ...primaryBtn, opacity: title.trim() && !saving ? 1 : 0.5 }}>
-              {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <><Check size={16} /> Save to Archive</>}
+              {saving ? <OrbitSpinner size={16} /> : <><Check size={16} /> Save to Archive</>}
             </button>
           </>
         )}
@@ -1421,7 +1440,7 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent, google, onCon
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setShowForm(false)} style={{ ...secondaryBtn, flex: 1 }}>Cancel</button>
               <button onClick={saveEvent} disabled={saving || !title.trim()} style={{ ...primaryBtn, flex: 1, opacity: saving || !title.trim() ? 0.6 : 1 }}>
-                {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Save"}
+                {saving ? <OrbitSpinner size={16} /> : "Save"}
               </button>
             </div>
           </div>
@@ -1693,7 +1712,7 @@ function GroupFlowModal({ initialMode, onClose, onCreate, onJoin, go }) {
             </div>
             <ErrorBanner message={error} />
             <button onClick={submit} disabled={busy || !input.trim()} style={{ ...primaryBtn, opacity: busy || !input.trim() ? 0.6 : 1 }}>
-              {busy ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : mode === "create" ? "Create group" : "Join group"}
+              {busy ? <OrbitSpinner size={16} /> : mode === "create" ? "Create group" : "Join group"}
             </button>
           </div>
         ) : (
@@ -1805,7 +1824,7 @@ function GroupScreen({ back, user, group, embedded = false }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: embedded ? "auto" : "100%", flex: embedded ? 1 : undefined, minHeight: 0 }}>
       <TopBar title={group.name} onBack={embedded ? undefined : back} right={<>
-        <span style={{ fontSize: 11, fontWeight: 700, color: connected ? T.primary : T.inkFaint, alignSelf: "center", marginRight: 4 }}>{connected ? "● live" : "connecting…"}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: connected ? T.primary : T.inkFaint, alignSelf: "center", marginRight: 4 }}>{connected ? "● live" : <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><OrbitSpinner size={11} /> connecting…</span>}</span>
         <button onClick={() => setShowCode((s) => !s)} style={iconBtnStyle}><Users size={15} color={T.ink} /></button>
       </>} />
       {showCode && (
@@ -1969,7 +1988,7 @@ function InsightsScreen({ back, tasks, studySessions, onLogSession, onRenameSess
               <button onClick={() => setRunning(true)} style={primaryBtn}>Start studying</button>
             ) : (
               <button onClick={stopAndLog} disabled={saving} style={{ ...primaryBtn, background: T.danger, boxShadow: "none", opacity: saving ? 0.6 : 1 }}>
-                {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "Stop & log session"}
+                {saving ? <OrbitSpinner size={16} /> : "Stop & log session"}
               </button>
             )}
           </div>
@@ -2193,15 +2212,16 @@ function GoogleSyncBar({ google, pending, onConnect, onSync }) {
   const [busy, setBusy] = useState(false);
   if (!google || !google.configured) return null; // hidden until the server has Google set up
   const run = async (fn) => { setBusy(true); try { await fn(); } finally { setBusy(false); } };
-  const link = { background: "none", border: "none", cursor: busy ? "default" : "pointer", fontSize: 12.5, fontWeight: 700, color: T.primary, padding: 0, opacity: busy ? 0.6 : 1 };
+  const link = { background: "none", border: "none", cursor: busy ? "default" : "pointer", fontSize: 12.5, fontWeight: 700, color: T.primary, padding: 0, display: "inline-flex", alignItems: "center", gap: 6 };
+  const label = (idle, busyText) => (busy ? <><OrbitSpinner size={13} /> {busyText}</> : idle);
   let text; let action = null;
   if (google.connected && google.needs_reauth) {
-    text = "Google Calendar needs to be reconnected."; action = <button disabled={busy} onClick={() => run(onConnect)} style={link}>Reconnect</button>;
+    text = "Google Calendar needs to be reconnected."; action = <button disabled={busy} onClick={() => run(onConnect)} style={link}>{label("Reconnect", "Opening Google…")}</button>;
   } else if (google.connected) {
     text = `Events sync to Google Calendar${google.email ? ` (${google.email})` : ""}.`;
-    if (pending > 0) action = <button disabled={busy} onClick={() => run(onSync)} style={link}>{busy ? "Syncing…" : `Sync ${pending} now`}</button>;
+    if (pending > 0) action = <button disabled={busy} onClick={() => run(onSync)} style={link}>{label(`Sync ${pending} now`, "Syncing…")}</button>;
   } else {
-    text = "Show your Orbit events in Google Calendar too."; action = <button disabled={busy} onClick={() => run(onConnect)} style={link}>Connect</button>;
+    text = "Show your Orbit events in Google Calendar too."; action = <button disabled={busy} onClick={() => run(onConnect)} style={link}>{label("Connect", "Opening Google…")}</button>;
   }
   return (
     <div className="orbit-card" style={{ ...rowCardStyle, gap: 10, padding: "10px 14px" }}>
@@ -2342,7 +2362,7 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
                 <div style={{ display: "flex", gap: 8 }}>
                   <button type="button" disabled={savingName} onClick={() => setEditingName(false)} style={{ ...secondaryBtn, flex: 1, padding: "9px 12px" }}>Cancel</button>
                   <button type="submit" disabled={savingName || !nameDraft.trim()} style={{ ...primaryBtn, flex: 1, padding: "9px 12px", opacity: savingName || !nameDraft.trim() ? 0.6 : 1 }}>
-                    {savingName ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : "Save"}
+                    {savingName ? <OrbitSpinner size={15} /> : "Save"}
                   </button>
                 </div>
               </form>
@@ -2373,7 +2393,7 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
             <input type="email" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} placeholder="you@school.edu" style={inputStyle} />
             {linkError && <ErrorBanner message={linkError} />}
             <button type="submit" disabled={linking || !emailInput.trim()} style={{ ...secondaryBtn, opacity: linking || !emailInput.trim() ? 0.6 : 1 }}>
-              {linking ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : "Link email"}
+              {linking ? <OrbitSpinner size={15} /> : "Link email"}
             </button>
           </form>
         )}
@@ -2408,7 +2428,7 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
               </div>
               {(!google.connected || google.needs_reauth) && (
                 <button disabled={googleBusy} onClick={async () => { setGoogleBusy(true); try { await onConnectGoogle(); } finally { setGoogleBusy(false); } }} style={{ ...secondaryBtn, padding: "7px 14px", opacity: googleBusy ? 0.6 : 1 }}>
-                  {google.needs_reauth ? "Reconnect" : "Connect"}
+                  {googleBusy ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><OrbitSpinner size={13} /> Opening Google…</span> : google.needs_reauth ? "Reconnect" : "Connect"}
                 </button>
               )}
               {google.connected && !google.needs_reauth && (
@@ -2420,7 +2440,7 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
                     try { await onDisconnectGoogle(); } finally { setGoogleBusy(false); }
                   }}
                   style={{ ...secondaryBtn, padding: "7px 14px", color: confirmGoogleOff ? "#fff" : T.danger, background: confirmGoogleOff ? T.danger : undefined, border: confirmGoogleOff ? "none" : undefined, opacity: googleBusy ? 0.6 : 1 }}
-                >{confirmGoogleOff ? "Disconnect?" : "Disconnect"}</button>
+                >{googleBusy ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><OrbitSpinner size={13} /> Disconnecting…</span> : confirmGoogleOff ? "Disconnect?" : "Disconnect"}</button>
               )}
             </div>
           </>
@@ -2428,7 +2448,7 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
 
         <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginTop: 10 }}>Your data</div>
         <div onClick={exporting ? undefined : exportData} className="orbit-card" style={{ ...rowCardStyle, cursor: exporting ? "default" : "pointer", opacity: exporting ? 0.6 : 1 }}>
-          {exporting ? <Loader2 size={17} color={T.inkSoft} style={{ animation: "spin 1s linear infinite" }} /> : <Download size={17} color={T.inkSoft} />}
+          {exporting ? <OrbitSpinner size={17} color={T.inkSoft} /> : <Download size={17} color={T.inkSoft} />}
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13.5, color: T.ink }}>Export my data</div>
             <div style={{ fontSize: 11.5, color: T.inkFaint }}>Download everything in your account as a JSON file</div>
@@ -2452,7 +2472,7 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
             <div style={{ display: "flex", gap: 10 }}>
               <button type="button" disabled={deleting} onClick={() => { setShowDelete(false); setDeletePassword(""); setDeleteError(""); }} style={{ ...secondaryBtn, flex: 1 }}>Cancel</button>
               <button type="submit" disabled={deleting || !deletePassword} style={{ ...secondaryBtn, flex: 1, background: T.danger, color: "#fff", border: "none", opacity: deleting || !deletePassword ? 0.6 : 1 }}>
-                {deleting ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : "Delete forever"}
+                {deleting ? <OrbitSpinner size={15} /> : "Delete forever"}
               </button>
             </div>
           </form>
@@ -2680,6 +2700,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   }
 
   async function syncGoogleNow() {
+    setGoogleNotice({ kind: "loading", text: "Sending your events to Google Calendar…" });
     try {
       const r = await googleApi.syncNow();
       setEvents(await api.events.list());
@@ -2903,6 +2924,7 @@ function GlobalStyles() {
       @keyframes twinkle { 0%, 100% { opacity: .18; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.25); } }
 
       @keyframes corePulse { 0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(10,132,84,.35), 0 0 22px rgba(61,220,151,.55); } 50% { transform: scale(1.14); box-shadow: 0 0 0 12px rgba(10,132,84,0), 0 0 30px rgba(61,220,151,.8); } }
+      @keyframes miniPulse { 0%, 100% { transform: scale(.85); opacity: .75; } 50% { transform: scale(1.2); opacity: 1; } }
       @keyframes labelBreathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 
       /* loading screen */
@@ -2916,6 +2938,12 @@ function GlobalStyles() {
       .orbit-loader-label { animation: labelBreathe 2s ease-in-out infinite; }
       .orbit-loader-bar { width: 150px; height: 3px; border-radius: 3px; overflow: hidden; background: rgba(10,132,84,.12); }
       .orbit-loader-bar span { display: block; height: 100%; width: 38%; border-radius: 3px; background: linear-gradient(90deg, transparent, ${T.primaryBright}, ${T.primary}); animation: progressSlide 1.3s var(--ease) infinite; }
+
+      /* inline spinner */
+      .orbit-mini { position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; vertical-align: middle; }
+      .orbit-mini-core { position: absolute; width: 30%; height: 30%; border-radius: 999px; background: currentColor; animation: miniPulse 1.6s ease-in-out infinite; }
+      .orbit-mini-ring { position: absolute; inset: 0; border-radius: 999px; border: 1.5px solid currentColor; border-color: color-mix(in srgb, currentColor 22%, transparent); animation: spin .9s linear infinite; }
+      .orbit-mini-moon { position: absolute; top: -2px; left: calc(50% - 2.5px); width: 5px; height: 5px; border-radius: 999px; background: currentColor; }
 
       /* page + content entrances */
       .orbit-page { animation: fadeIn .35s var(--ease) both; }
