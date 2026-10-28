@@ -63,6 +63,110 @@ function useIsDesktop(breakpoint = 860) {
   return matches;
 }
 
+// The Orbit mark: a cat piloting a little flying saucer. Same artwork as
+// public/favicon.svg (small sizes drop the stars and thruster so it stays readable).
+function OrbitLogo({ size = 28, glow = true, animated = false }) {
+  const simple = size < 48;
+  return (
+    <svg className={animated ? "orbit-float" : undefined} width={size} height={size} viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Orbit" style={glow ? { filter: "drop-shadow(0 6px 16px rgba(10,132,84,0.45))" } : undefined}>
+      <defs>
+    <linearGradient id="ol-tile" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stopColor="#0E7A52"/>
+      <stop offset="0.5" stopColor="#094D35"/>
+      <stop offset="1" stopColor="#05281D"/>
+    </linearGradient>
+    <radialGradient id="ol-shine" cx="28%" cy="0%" r="90%">
+      <stop offset="0" stopColor="#FFFFFF" stopOpacity="0.2"/>
+      <stop offset="1" stopColor="#FFFFFF" stopOpacity="0"/>
+    </radialGradient>
+    <linearGradient id="ol-rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stopColor="#FFE9A8"/>
+      <stop offset="0.5" stopColor="#E8B84D"/>
+      <stop offset="1" stopColor="#B8892B"/>
+    </linearGradient>
+    <linearGradient id="ol-hull" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stopColor="#C99A35"/>
+      <stop offset="1" stopColor="#8A6418"/>
+    </linearGradient>
+    <radialGradient id="ol-cat" cx="38%" cy="28%" r="80%">
+      <stop offset="0" stopColor="#EAFBF1"/>
+      <stop offset="0.55" stopColor="#8FE3B0"/>
+      <stop offset="1" stopColor="#50C878"/>
+    </radialGradient>
+    <linearGradient id="ol-glass" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stopColor="#FFFFFF" stopOpacity="0.34"/>
+      <stop offset="0.55" stopColor="#BFF5DA" stopOpacity="0.14"/>
+      <stop offset="1" stopColor="#FFFFFF" stopOpacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="ol-flame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stopColor="#9BF5CB" stopOpacity="0.95"/>
+      <stop offset="1" stopColor="#3DDC97" stopOpacity="0"/>
+    </linearGradient>
+    <radialGradient id="ol-planet" cx="35%" cy="30%" r="75%">
+      <stop offset="0" stopColor="#FFE9A8"/>
+      <stop offset="1" stopColor="#D9A441"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="116" fill="url(#ol-tile)"/>
+  <rect width="512" height="512" rx="116" fill="url(#ol-shine)"/>
+  {!simple && (
+  <g>
+    <path d="M92 76 L97.6 90.4 L112 96 L97.6 101.6 L92 116 L86.4 101.6 L72 96 L86.4 90.4 Z" fill="#FFE9A8" opacity="0.9"/>
+    <path d="M420 57 L423.64 66.36 L433 70 L423.64 73.64 L420 83 L416.36 73.64 L407 70 L416.36 66.36 Z" fill="#FFFFFF" opacity="0.8"/>
+    <path d="M446 222 L448.8 229.2 L456 232 L448.8 234.8 L446 242 L443.2 234.8 L436 232 L443.2 229.2 Z" fill="#FFE9A8" opacity="0.7"/>
+    <path d="M70 241 L72.52 247.48 L79 250 L72.52 252.52 L70 259 L67.48 252.52 L61 250 L67.48 247.48 Z" fill="#FFFFFF" opacity="0.6"/>
+    <circle cx="150" cy="58" r="3.5" fill="#fff" opacity="0.7"/>
+    <circle cx="338" cy="104" r="3" fill="#fff" opacity="0.6"/>
+    <circle cx="44" cy="160" r="3" fill="#fff" opacity="0.55"/>
+    <circle cx="470" cy="150" r="3.5" fill="#fff" opacity="0.6"/>
+    <circle cx="200" cy="130" r="2.5" fill="#fff" opacity="0.5"/>
+    <circle cx="418" cy="104" r="19" fill="url(#ol-planet)"/>
+    <ellipse cx="418" cy="104" rx="34" ry="9" fill="none" stroke="#FFE9A8" strokeOpacity="0.7" strokeWidth="4" transform="rotate(-22 418 104)"/>
+  </g>
+  )}
+  <g transform={simple ? "translate(256 262) scale(1.5) translate(-256 -318)" : "translate(256 252) scale(1.12) translate(-256 -330)"}>
+    {!simple && (<>
+    <path d="M214 398 Q256 500 298 398 Z" fill="url(#ol-flame)"/>
+    <ellipse cx="256" cy="402" rx="62" ry="12" fill="#3DDC97" opacity="0.35"/>
+    </>)}
+            <ellipse cx="256" cy="378" rx="108" ry="34" fill="url(#ol-hull)"/>
+        <path d="M148 346 A108 112 0 0 1 364 346 Z" fill="#06241A" opacity="0.55"/>
+    <path d="M208 284 L222 244 L246 264 Z" fill="url(#ol-cat)"/>
+    <path d="M304 284 L290 244 L266 264 Z" fill="url(#ol-cat)"/>
+    <path d="M216 276 L224 255 L238 266 Z" fill="#BFF0D4"/>
+    <path d="M296 276 L288 255 L274 266 Z" fill="#BFF0D4"/>
+    <ellipse cx="256" cy="294" rx="52" ry="44" fill="url(#ol-cat)"/>
+    <ellipse cx="237" cy="288" rx="7.5" ry="10" fill="#0A2617"/>
+    <ellipse cx="275" cy="288" rx="7.5" ry="10" fill="#0A2617"/>
+    <circle cx="239.5" cy="284" r="2.6" fill="#fff"/>
+    <circle cx="277.5" cy="284" r="2.6" fill="#fff"/>
+    <path d="M250 301 L262 301 L256 308 Z" fill="#E88CA0"/>
+    <path d="M256 308 Q250 314 243 311 M256 308 Q262 314 269 311" fill="none" stroke="#0A2617" strokeWidth="2.6" strokeLinecap="round"/>
+    <path d="M214 298 L190 292 M214 304 L190 306 M298 298 L322 292 M298 304 L322 306" stroke="#0A2617" strokeOpacity="0.45" strokeWidth="2.4" strokeLinecap="round"/>
+        <ellipse cx="256" cy="352" rx="175" ry="38" fill="url(#ol-rim)"/>
+    <ellipse cx="256" cy="352" rx="175" ry="38" fill="none" stroke="#8A6418" strokeOpacity="0.55" strokeWidth="3"/>
+    <path d="M110 346 Q256 318 402 346" fill="none" stroke="#FFFFFF" strokeOpacity="0.55" strokeWidth="5" strokeLinecap="round"/>
+    <circle cx="128" cy="368.1" r="7.5" fill="#3DDC97"/>
+    <circle cx="128" cy="368.1" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="178" cy="373.1" r="7.5" fill="#3DDC97"/>
+    <circle cx="178" cy="373.1" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="230" cy="375.3" r="7.5" fill="#3DDC97"/>
+    <circle cx="230" cy="375.3" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="282" cy="375.3" r="7.5" fill="#3DDC97"/>
+    <circle cx="282" cy="375.3" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="334" cy="373.1" r="7.5" fill="#3DDC97"/>
+    <circle cx="334" cy="373.1" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="384" cy="368.1" r="7.5" fill="#3DDC97"/>
+    <circle cx="384" cy="368.1" r="13" fill="#3DDC97" opacity="0.28"/>
+        <path d="M148 346 A108 112 0 0 1 364 346 Q256 366 148 346 Z" fill="url(#ol-glass)"/>
+    <path d="M148 346 A108 112 0 0 1 364 346" fill="none" stroke="#FFFFFF" strokeOpacity="0.65" strokeWidth="5" strokeLinecap="round"/>
+    <path d="M186 292 Q198 250 236 236" fill="none" stroke="#FFFFFF" strokeOpacity="0.8" strokeWidth="7" strokeLinecap="round"/>
+  </g>
+    </svg>
+  );
+}
+
 function OrbitCatLogo({ size = 28, glow = true, animated = false }) {
   return (
     <svg className={animated ? "orbit-float" : undefined} width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" style={glow ? { filter: "drop-shadow(0 0 10px rgba(61,220,151,0.5))" } : undefined}>
@@ -212,6 +316,155 @@ function ErrorBanner({ message }) {
     <div className="orbit-pop-in" style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#FCEAEE", border: "1px solid #F3C6D1", borderRadius: 12, padding: 12, fontSize: 12.5, color: "#A5223F" }}>
       <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
       {message}
+    </div>
+  );
+}
+
+// ---- Profile pictures ---------------------------------------------------------
+// Pictures are fetched with the login token (they're only visible to the owner and
+// to people who share a group with them), so they're loaded with fetch() and shown
+// from a blob/data URL rather than a bare <img src>.
+const avatarCache = new Map(); // "userId:version" -> Promise<string | null>
+function loadAvatar(userId, version) {
+  const key = `${userId}:${version}`;
+  if (!avatarCache.has(key)) {
+    const p = fetch(`${String(api.base).replace(/\/$/, "")}/users/${encodeURIComponent(userId)}/avatar`, {
+      headers: { Authorization: `Bearer ${api.getToken()}` },
+    })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((b) => (b ? URL.createObjectURL(b) : null))
+      .catch(() => null);
+    avatarCache.set(key, p);
+    // A miss (no picture / no access) is remembered for a few minutes so a long
+    // chat doesn't re-ask for every message, then forgotten in case it changes.
+    p.then((url) => { if (!url) setTimeout(() => avatarCache.delete(key), 300000); });
+  }
+  return avatarCache.get(key);
+}
+function primeAvatar(userId, version, url) {
+  avatarCache.set(`${userId}:${version}`, Promise.resolve(url));
+}
+
+const AVATAR_COLORS = [T.primary, "#B8760F", T.teal, T.coral];
+function Avatar({ userId, name, version = 0, hasAvatar = true, size = 36 }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let off = false;
+    setSrc(null);
+    if (userId && hasAvatar) loadAvatar(userId, version).then((url) => { if (!off) setSrc(url); });
+    return () => { off = true; };
+  }, [userId, version, hasAvatar]);
+  const label = Array.from(name || "?")[0].toUpperCase();
+  const seed = Array.from(String(userId || name || "")).reduce((a, c) => a + c.charCodeAt(0), 0);
+  const color = AVATAR_COLORS[seed % AVATAR_COLORS.length];
+  return (
+    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: 999, overflow: "hidden", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", background: src ? T.line : `${color}22`, color, fontWeight: 800, fontSize: Math.round(size * 0.42) }}>
+      {src ? <img src={src} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : label}
+    </span>
+  );
+}
+
+// Pick the part of the photo to keep: drag to move, slider to zoom. The result is a
+// square JPEG; the server crops/re-encodes it again, so this is just for framing.
+const CROP_VIEW = 260;
+function AvatarCropper({ file, onCancel, onSave }) {
+  const [img, setImg] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [off, setOff] = useState({ x: 0, y: 0 });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const drag = useRef(null);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    const el = new Image();
+    el.onload = () => setImg(el);
+    el.onerror = () => setError("That image couldn't be opened. Try a JPG or PNG.");
+    el.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape" && !saving) onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel, saving]);
+
+  const base = img ? Math.max(CROP_VIEW / img.naturalWidth, CROP_VIEW / img.naturalHeight) : 1; // "cover" scale
+  const scale = base * zoom;
+  const clamp = (o, z = zoom) => {
+    if (!img) return o;
+    const sc = base * z;
+    const mx = Math.max(0, (img.naturalWidth * sc - CROP_VIEW) / 2);
+    const my = Math.max(0, (img.naturalHeight * sc - CROP_VIEW) / 2);
+    return { x: Math.min(mx, Math.max(-mx, o.x)), y: Math.min(my, Math.max(-my, o.y)) };
+  };
+  function onPointerDown(e) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { x: e.clientX, y: e.clientY, off };
+  }
+  function onPointerMove(e) {
+    if (!drag.current) return;
+    setOff(clamp({ x: drag.current.off.x + e.clientX - drag.current.x, y: drag.current.off.y + e.clientY - drag.current.y }));
+  }
+  function onZoom(e) {
+    const z = Number(e.target.value);
+    setZoom(z);
+    setOff((o) => clamp(o, z));
+  }
+
+  async function save() {
+    if (!img) return;
+    setSaving(true);
+    setError("");
+    try {
+      const OUT = 512;
+      const canvas = document.createElement("canvas");
+      canvas.width = OUT;
+      canvas.height = OUT;
+      const ctx = canvas.getContext("2d");
+      const sw = CROP_VIEW / scale;
+      const sx = img.naturalWidth / 2 - off.x / scale - sw / 2;
+      const sy = img.naturalHeight / 2 - off.y / scale - sw / 2;
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, OUT, OUT);
+      ctx.drawImage(img, sx, sy, sw, sw, 0, 0, OUT, OUT);
+      await onSave(canvas.toDataURL("image/jpeg", 0.9));
+    } catch (err) {
+      setError(err.message || "Couldn't save your picture.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="orbit-overlay" onClick={() => !saving && onCancel()} style={{ position: "fixed", inset: 0, background: "rgba(10,30,22,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="orbit-dialog" role="dialog" aria-modal="true" aria-label="Choose your profile picture" onClick={(e) => e.stopPropagation()} style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 22, width: "100%", maxWidth: 380, padding: "20px 20px 18px", boxShadow: T.shadowLg, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+        <div style={{ fontWeight: 800, fontSize: 17, color: T.ink, letterSpacing: -0.3, alignSelf: "flex-start" }}>Profile picture</div>
+        <div
+          onPointerDown={img ? onPointerDown : undefined}
+          onPointerMove={onPointerMove}
+          onPointerUp={() => { drag.current = null; }}
+          onPointerCancel={() => { drag.current = null; }}
+          style={{ width: CROP_VIEW, height: CROP_VIEW, borderRadius: 999, overflow: "hidden", position: "relative", background: T.line, touchAction: "none", cursor: img ? "grab" : "default", boxShadow: `0 0 0 4px ${T.primarySoft}, ${T.shadow}`, userSelect: "none" }}
+        >
+          {img ? (
+            <img src={img.src} alt="" draggable={false} style={{ position: "absolute", maxWidth: "none", width: img.naturalWidth * scale, height: img.naturalHeight * scale, left: CROP_VIEW / 2 - (img.naturalWidth * scale) / 2 + off.x, top: CROP_VIEW / 2 - (img.naturalHeight * scale) / 2 + off.y, pointerEvents: "none" }} />
+          ) : !error ? (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><OrbitSpinner size={26} color={T.primary} /></div>
+          ) : null}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%" }}>
+          <span style={{ fontSize: 12, color: T.inkFaint }}>Zoom</span>
+          <input type="range" min="1" max="3" step="0.01" value={zoom} onChange={onZoom} disabled={!img} aria-label="Zoom" style={{ flex: 1, accentColor: T.primary }} />
+        </div>
+        <div style={{ fontSize: 12, color: T.inkFaint, textAlign: "center" }}>Drag the photo to reposition it.</div>
+        {error && <div style={{ width: "100%" }}><ErrorBanner message={error} /></div>}
+        <div style={{ display: "flex", gap: 10, width: "100%" }}>
+          <button onClick={onCancel} disabled={saving} style={{ ...secondaryBtn, flex: 1 }}>Cancel</button>
+          <button onClick={save} disabled={!img || saving} style={{ ...primaryBtn, flex: 1, opacity: !img || saving ? 0.6 : 1 }}>
+            {saving ? <OrbitSpinner size={16} /> : "Save"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -411,12 +664,12 @@ This is a summary for in-app display. The full Terms of Service document governs
   },
   privacy: {
     title: "Privacy Policy",
-    body: `Last updated: October 17, 2026
+    body: `Last updated: October 28, 2026
 
 This explains what Orbit collects and how we use it. The data controller for Orbit is the operator of this service, contactable at ryecellz23@gmail.com.
 
 # What we collect
-Account info: username (required), password (hashed, never stored in plain text), and full name and email (both optional). Your date of birth is checked at signup only to verify you meet the minimum age, and is not stored.
+Account info: username (required), password (hashed, never stored in plain text), and full name, email and profile picture (all optional). A profile picture is resized to a small square copy before it is stored; the original you picked is not kept. It is visible to you and to people who share a group with you, and it is deleted when you remove it or delete your account. Your date of birth is checked at signup only to verify you meet the minimum age, and is not stored.
 
 Your content: folders, archive items (including photos you upload), tasks, reminders, calendar events, study session logs, and group messages.
 
@@ -588,7 +841,7 @@ function AuthScreen({ onAuthed }) {
           <span key={i} className="orbit-star" style={{ top: `${top}%`, left: `${left}%`, width: size, height: size, animationDelay: `${delay}s` }} />
         ))}
         <div style={{ position: "relative", zIndex: 1, maxWidth: 460 }}>
-          <OrbitCatLogo size={68} animated />
+          <OrbitLogo size={68} animated />
           <div style={{ fontSize: 52, fontWeight: 800, color: "#fff", letterSpacing: -1.6, lineHeight: 1.04, marginTop: 26 }}>
             Capture it.<br />File it.<br /><span style={{ color: T.primaryBright }}>Find it.</span>
           </div>
@@ -607,7 +860,7 @@ function AuthScreen({ onAuthed }) {
       <main className="orbit-auth-main">
       <div className={["orbit-auth-card", "orbit-stagger", shake ? "orbit-shake" : "", success ? "orbit-card-out" : "", loading && !success ? "orbit-auth-busy" : ""].filter(Boolean).join(" ")}>
       <div className="orbit-auth-mobilelogo" style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 30 }}>
-        <OrbitCatLogo size={46} animated />
+        <OrbitLogo size={46} animated />
         <span style={{ fontWeight: 800, fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>ORBIT</span>
       </div>
 
@@ -754,7 +1007,7 @@ function ResetPasswordScreen({ token, onDone }) {
   return (
     <div className="orbit-stagger" style={{ minHeight: "640px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 28px", maxWidth: 420, margin: "0 auto", background: T.bg, ...STARFIELD_BG, animation: "fadeIn 0.4s ease" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 30 }}>
-        <OrbitCatLogo size={46} animated />
+        <OrbitLogo size={46} animated />
         <span style={{ fontWeight: 800, fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>ORBIT</span>
       </div>
 
@@ -889,9 +1142,14 @@ function HomeScreen({ folderList, tasks, go, user }) {
           <div style={{ fontSize: 24, fontWeight: 800, color: T.ink, letterSpacing: -0.5 }}>{(() => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; })()}, {(user.name || user.username).split(" ")[0]} 👋</div>
           <div style={{ color: T.inkSoft, fontSize: 14, marginTop: 2 }}>Stay productive today.</div>
         </div>
-        <button onClick={() => go("reminders")} style={{ ...iconBtnStyle, position: "relative" }}>
-          <Bell size={17} color={T.ink} />
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => go("profile")} aria-label="Your profile" title="Your profile" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex" }}>
+            <Avatar userId={user.id} name={user.name || user.username} version={user.avatar_version || 0} hasAvatar={!!user.has_avatar} size={38} />
+          </button>
+          <button onClick={() => go("reminders")} style={{ ...iconBtnStyle, position: "relative" }}>
+            <Bell size={17} color={T.ink} />
+          </button>
+        </div>
       </div>
 
       <div style={{ padding: "16px 20px 0" }}>
@@ -1843,10 +2101,13 @@ function GroupScreen({ back, user, group, embedded = false }) {
           const mine = m.sender_id ? m.sender_id === user.id : m.sender_name === (user.name || user.username);
           const sentAt = m.created_at ? new Date(m.created_at.endsWith("Z") || /[+-]\d\d:\d\d$/.test(m.created_at) ? m.created_at : `${m.created_at}Z`) : null;
           return (
-            <div key={m.id} className="orbit-msg" style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: embedded ? "70%" : "78%" }}>
-              {!mine && <div style={{ fontSize: 11, fontWeight: 700, color: T.primary, marginBottom: 2 }}>{m.sender_name}</div>}
-              <div style={{ background: mine ? T.primary : T.panel, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: 14, padding: "10px 13px", fontSize: 13.5, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{m.text}</div>
-              {sentAt && !isNaN(sentAt) && <div style={{ fontSize: 10.5, color: T.inkFaint, marginTop: 3, textAlign: mine ? "right" : "left" }}>{sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</div>}
+            <div key={m.id} className="orbit-msg" style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: embedded ? "70%" : "78%", display: "flex", gap: 8, alignItems: "flex-end" }}>
+              {!mine && <Avatar userId={m.sender_id} name={m.sender_name} size={28} />}
+              <div style={{ minWidth: 0 }}>
+                {!mine && <div style={{ fontSize: 11, fontWeight: 700, color: T.primary, marginBottom: 2 }}>{m.sender_name}</div>}
+                <div style={{ background: mine ? T.primary : T.panel, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: 14, padding: "10px 13px", fontSize: 13.5, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{m.text}</div>
+                {sentAt && !isNaN(sentAt) && <div style={{ fontSize: 10.5, color: T.inkFaint, marginTop: 3, textAlign: mine ? "right" : "left" }}>{sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</div>}
+              </div>
             </div>
           );
         })}
@@ -2185,6 +2446,9 @@ const folderApi = {
 
 // Display-name change (kept here so api.js doesn't need changes).
 const profileApi = {
+  setAvatar: (image) =>
+    accountRequest("/me/avatar", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image }) }).then((r) => r.json()),
+  removeAvatar: () => accountRequest("/me/avatar", { method: "DELETE" }).then((r) => r.json()),
   rename: (name) =>
     accountRequest("/me", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then((r) => r.json()),
 };
@@ -2236,6 +2500,10 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
   const [confirmGoogleOff, setConfirmGoogleOff] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
   const [emailInput, setEmailInput] = useState("");
+  const [cropFile, setCropFile] = useState(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
+  const avatarInputRef = useRef(null);
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState("");
   const [legalModal, setLegalModal] = useState(null); // null | "terms" | "privacy"
@@ -2313,6 +2581,35 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
     }
   }
 
+  function onAvatarFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // so picking the same file again still fires
+    setAvatarError("");
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { setAvatarError("Please choose an image file (JPG, PNG or WebP)."); return; }
+    if (file.size > 15 * 1024 * 1024) { setAvatarError("That image is too large — please choose one under 15 MB."); return; }
+    setCropFile(file);
+  }
+
+  async function saveAvatar(dataUrl) {
+    const updated = await profileApi.setAvatar(dataUrl);
+    primeAvatar(updated.id, updated.avatar_version, dataUrl); // show it instantly, no refetch
+    onUserUpdate(updated);
+    setCropFile(null);
+  }
+
+  async function removeAvatar() {
+    setAvatarBusy(true);
+    setAvatarError("");
+    try {
+      onUserUpdate(await profileApi.removeAvatar());
+    } catch (err) {
+      setAvatarError(err.message || "Couldn't remove your picture.");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
   async function linkEmail(e) {
     e.preventDefault();
     setLinking(true);
@@ -2341,9 +2638,19 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
     <div>
       <TopBar title="Profile" onBack={back} />
       {legalModal && <LegalModal type={legalModal} onClose={() => setLegalModal(null)} />}
+      {cropFile && <AvatarCropper file={cropFile} onCancel={() => setCropFile(null)} onSave={saveAvatar} />}
       <div className="orbit-stagger" style={screenBox}>
         <div className="orbit-card" style={{ ...rowCardStyle, gap: 14, alignItems: editingName ? "flex-start" : "center" }}>
-          <div style={{ flexShrink: 0, width: 50, height: 50, borderRadius: 999, background: T.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", color: T.primary, fontWeight: 800, fontSize: 18 }}>{Array.from(user.name || user.username)[0].toUpperCase()}</div>
+          <button
+            onClick={() => avatarInputRef.current && avatarInputRef.current.click()}
+            aria-label="Change profile picture"
+            title="Change profile picture"
+            style={{ position: "relative", flexShrink: 0, width: 64, height: 64, padding: 0, border: "none", background: "none", cursor: "pointer", alignSelf: "center" }}
+          >
+            <Avatar userId={user.id} name={user.name || user.username} version={user.avatar_version || 0} hasAvatar={!!user.has_avatar} size={64} />
+            <span style={{ position: "absolute", right: -2, bottom: -2, width: 24, height: 24, borderRadius: 999, background: T.primary, border: `2px solid ${T.panel}`, display: "flex", alignItems: "center", justifyContent: "center" }}><Camera size={12} color="#fff" /></span>
+          </button>
+          <input ref={avatarInputRef} type="file" accept="image/*" onChange={onAvatarFile} style={{ display: "none" }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             {editingName ? (
               <form onSubmit={saveName} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2370,6 +2677,14 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
               <>
                 <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink, overflowWrap: "anywhere" }}>{user.name || user.username}</div>
                 <div style={{ fontSize: 12.5, color: T.inkFaint }}>@{user.username}</div>
+                <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 12, fontWeight: 700 }}>
+                  <span onClick={() => avatarInputRef.current && avatarInputRef.current.click()} style={{ color: T.primary, cursor: "pointer" }}>{user.has_avatar ? "Change photo" : "Add photo"}</span>
+                  {user.has_avatar && (
+                    <span onClick={avatarBusy ? undefined : removeAvatar} style={{ color: T.inkSoft, cursor: avatarBusy ? "default" : "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      {avatarBusy ? <><OrbitSpinner size={11} /> Removing…</> : "Remove"}
+                    </span>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -2377,6 +2692,8 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
             <button onClick={startNameEdit} aria-label="Edit display name" title="Edit display name" style={iconBtnStyle}><Pencil size={15} color={T.ink} /></button>
           )}
         </div>
+
+        {avatarError && <ErrorBanner message={avatarError} />}
 
         {user.email ? (
           <div className="orbit-card" style={rowCardStyle}>
@@ -2825,7 +3142,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     <div style={{ display: "flex", minHeight: "640px", background: T.bg, fontFamily: "'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif", ...STARFIELD_BG }}>
       <div className="orbit-sidebar" style={{ width: 220, background: T.sidebar, padding: "22px 14px", flexShrink: 0, display: "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px 26px" }}>
-          <OrbitCatLogo size={34} />
+          <OrbitLogo size={34} />
           <span style={{ color: "#fff", fontWeight: 800, fontSize: 16, letterSpacing: -0.3 }}>ORBIT</span>
         </div>
         {NAV_ITEMS.map((n) => (

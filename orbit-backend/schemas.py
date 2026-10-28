@@ -103,9 +103,16 @@ class UserOut(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     is_verified: bool
+    has_avatar: bool = False
+    avatar_version: Optional[int] = None
 
     class Config:
         from_attributes = True
+
+
+class AvatarUpload(BaseModel):
+    # A data URL ("data:image/jpeg;base64,...") — the server re-encodes it, see avatars.py.
+    image: str = Field(max_length=3_000_000)
 
 
 class Token(BaseModel):

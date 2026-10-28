@@ -27,3 +27,6 @@ sentry-sdk[fastapi]==2.14.0
 
 # Encrypts stored Google refresh tokens (already installed via python-jose[cryptography]).
 cryptography
+
+# Profile pictures: re-encodes uploaded images safely.
+pillow==10.4.0

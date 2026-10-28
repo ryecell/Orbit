@@ -8,7 +8,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 import auth
+import avatars
 import google_calendar
 import models
 import schemas
@@ -313,6 +314,66 @@ def reset_password(request: Request, payload: schemas.ResetPasswordRequest, db: 
 @app.get("/me", response_model=schemas.UserOut)
 def me(current_user: models.User = Depends(auth.get_current_user)):
     return current_user
+
+
+# ---------- profile picture ----------
+
+@app.put("/me/avatar", response_model=schemas.UserOut)
+@limiter.limit("10/minute")
+def set_avatar(
+    request: Request,
+    payload: schemas.AvatarUpload,
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        jpeg = avatars.process_avatar(avatars.decode_data_url(payload.image))
+    except avatars.AvatarError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    user.avatar = jpeg
+    user.avatar_updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/me/avatar", response_model=schemas.UserOut)
+def remove_avatar(user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    user.avatar = None
+    user.avatar_updated_at = None
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.get("/users/{user_id}/avatar")
+def get_avatar(user_id: str, user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """
+    A picture is visible to its owner and to people who share a group with them —
+    not to everyone with an account. (It's fetched with the login token, so the
+    frontend loads it with fetch() and shows it from a blob URL, not a bare <img src>.)
+    """
+    if user_id != user.id:
+        mine = db.query(models.GroupMembership.group_id).filter(models.GroupMembership.user_id == user.id)
+        shares_group = (
+            db.query(models.GroupMembership.id)
+            .filter(models.GroupMembership.user_id == user_id, models.GroupMembership.group_id.in_(mine))
+            .first()
+        )
+        if not shares_group:
+            raise HTTPException(status_code=404, detail="Not found")
+    owner = db.query(models.User).filter(models.User.id == user_id, models.User.deleted_at.is_(None)).first()
+    if not owner or not owner.avatar_updated_at or not owner.avatar:
+        raise HTTPException(status_code=404, detail="Not found")
+    return Response(
+        content=owner.avatar,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+        },
+    )
 
 
 @app.patch("/me", response_model=schemas.UserOut)
@@ -1084,6 +1145,8 @@ def _erase_user_data(db: Session, user: models.User) -> None:
     user.failed_login_attempts = 0
     user.locked_until = None
     user.sessions_invalidated_at = now  # kills every token issued before this moment
+    user.avatar = None
+    user.avatar_updated_at = None
     user.deleted_at = now
 
 
@@ -1150,6 +1213,7 @@ def export_my_data(request: Request, user: models.User = Depends(auth.get_curren
             "email_verified": user.is_verified,
             "created_at": user.created_at,
             "accepted_terms_at": user.accepted_terms_at,
+            "profile_picture": avatars.to_data_url(user.avatar) if user.avatar else None,
         },
         "folders": [
             {

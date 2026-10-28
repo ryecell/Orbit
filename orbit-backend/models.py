@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy.orm import deferred, relationship
 
 from database import Base
 
@@ -55,6 +55,21 @@ class User(Base):
     # Account lockout after repeated failed logins
     failed_login_attempts = Column(Integer, default=0)
     locked_until = Column(DateTime, nullable=True)
+
+    # Profile picture: a small (256px) JPEG made by avatars.process_avatar.
+    # deferred() keeps the image bytes out of the user lookup that runs on every
+    # authenticated request — they're only read when the picture is actually served.
+    avatar = deferred(Column(LargeBinary, nullable=True))
+    avatar_updated_at = Column(DateTime, nullable=True)
+
+    @property
+    def has_avatar(self) -> bool:
+        return self.avatar_updated_at is not None
+
+    @property
+    def avatar_version(self):
+        # Changes whenever the picture does, so browsers/caches know to refetch.
+        return int(self.avatar_updated_at.timestamp()) if self.avatar_updated_at else None
 
     folders = relationship("Folder", back_populates="owner", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="owner", cascade="all, delete-orphan")

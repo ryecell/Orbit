@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Orbit">
+  <defs>
+    <linearGradient id="tile" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#0E7A52"/>
+      <stop offset="0.5" stop-color="#094D35"/>
+      <stop offset="1" stop-color="#05281D"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="28%" cy="0%" r="90%">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE9A8"/>
+      <stop offset="0.5" stop-color="#E8B84D"/>
+      <stop offset="1" stop-color="#B8892B"/>
+    </linearGradient>
+    <linearGradient id="hull" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#C99A35"/>
+      <stop offset="1" stop-color="#8A6418"/>
+    </linearGradient>
+    <radialGradient id="cat" cx="38%" cy="28%" r="80%">
+      <stop offset="0" stop-color="#EAFBF1"/>
+      <stop offset="0.55" stop-color="#8FE3B0"/>
+      <stop offset="1" stop-color="#50C878"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.34"/>
+      <stop offset="0.55" stop-color="#BFF5DA" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9BF5CB" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#3DDC97" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="planet" cx="35%" cy="30%" r="75%">
+      <stop offset="0" stop-color="#FFE9A8"/>
+      <stop offset="1" stop-color="#D9A441"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#tile)"/>
+  <rect width="512" height="512" rx="116" fill="url(#shine)"/>
+  <g transform="translate(256 262) scale(1.5) translate(-256 -318)">
+    <!-- hull underside -->
+    <ellipse cx="256" cy="378" rx="108" ry="34" fill="url(#hull)"/>
+    <!-- cat in the cockpit -->
+    <path d="M148 346 A108 112 0 0 1 364 346 Z" fill="#06241A" opacity="0.55"/>
+    <path d="M208 284 L222 244 L246 264 Z" fill="url(#cat)"/>
+    <path d="M304 284 L290 244 L266 264 Z" fill="url(#cat)"/>
+    <path d="M216 276 L224 255 L238 266 Z" fill="#BFF0D4"/>
+    <path d="M296 276 L288 255 L274 266 Z" fill="#BFF0D4"/>
+    <ellipse cx="256" cy="294" rx="52" ry="44" fill="url(#cat)"/>
+    <ellipse cx="237" cy="288" rx="7.5" ry="10" fill="#0A2617"/>
+    <ellipse cx="275" cy="288" rx="7.5" ry="10" fill="#0A2617"/>
+    <circle cx="239.5" cy="284" r="2.6" fill="#fff"/>
+    <circle cx="277.5" cy="284" r="2.6" fill="#fff"/>
+    <path d="M250 301 L262 301 L256 308 Z" fill="#E88CA0"/>
+    <path d="M256 308 Q250 314 243 311 M256 308 Q262 314 269 311" fill="none" stroke="#0A2617" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M214 298 L190 292 M214 304 L190 306 M298 298 L322 292 M298 304 L322 306" stroke="#0A2617" stroke-opacity="0.45" stroke-width="2.4" stroke-linecap="round"/>
+    <!-- saucer rim, in front of the cat -->
+    <ellipse cx="256" cy="352" rx="175" ry="38" fill="url(#rim)"/>
+    <ellipse cx="256" cy="352" rx="175" ry="38" fill="none" stroke="#8A6418" stroke-opacity="0.55" stroke-width="3"/>
+    <path d="M110 346 Q256 318 402 346" fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="128" cy="368.1" r="7.5" fill="#3DDC97"/>
+    <circle cx="128" cy="368.1" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="178" cy="373.1" r="7.5" fill="#3DDC97"/>
+    <circle cx="178" cy="373.1" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="230" cy="375.3" r="7.5" fill="#3DDC97"/>
+    <circle cx="230" cy="375.3" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="282" cy="375.3" r="7.5" fill="#3DDC97"/>
+    <circle cx="282" cy="375.3" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="334" cy="373.1" r="7.5" fill="#3DDC97"/>
+    <circle cx="334" cy="373.1" r="13" fill="#3DDC97" opacity="0.28"/>
+    <circle cx="384" cy="368.1" r="7.5" fill="#3DDC97"/>
+    <circle cx="384" cy="368.1" r="13" fill="#3DDC97" opacity="0.28"/>
+    <!-- glass dome over the cat -->
+    <path d="M148 346 A108 112 0 0 1 364 346 Q256 366 148 346 Z" fill="url(#glass)"/>
+    <path d="M148 346 A108 112 0 0 1 364 346" fill="none" stroke="#FFFFFF" stroke-opacity="0.65" stroke-width="5" stroke-linecap="round"/>
+    <path d="M186 292 Q198 250 236 236" fill="none" stroke="#FFFFFF" stroke-opacity="0.8" stroke-width="7" stroke-linecap="round"/>
+  </g>
+</svg>
