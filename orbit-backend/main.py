@@ -13,7 +13,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 
 import ai_providers
@@ -403,6 +403,7 @@ def _item_out(item: models.Item) -> dict:
         "summary": item.summary,
         "tags": [t for t in item.tags.split(",") if t],
         "created_at": item.created_at,
+        "checklist": [{"id": c.id, "text": c.text, "done": bool(c.done)} for c in item.checklist],
     }
 
 
@@ -421,6 +422,7 @@ def _folder_out(folder: models.Folder) -> dict:
 def list_folders(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
     folders = (
         db.query(models.Folder)
+        .options(selectinload(models.Folder.items).selectinload(models.Item.checklist))
         .filter(models.Folder.owner_id == user.id)
         .order_by(models.Folder.position.asc(), func.lower(models.Folder.name).asc())
         .all()
@@ -504,6 +506,10 @@ def update_folder(folder_id: str, payload: schemas.FolderUpdate, db: Session = D
 def delete_folder(folder_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
     """Deletes the folder and every item inside it (cascade) — the frontend asks for confirmation first."""
     folder = _get_owned_folder(folder_id, db, user)
+    # Tasks linked to this folder (or its items) keep existing — they just lose the link.
+    db.query(models.Task).filter(models.Task.owner_id == user.id, models.Task.folder_id == folder.id).update(
+        {"folder_id": None, "item_id": None}, synchronize_session=False
+    )
     db.delete(folder)
     db.commit()
 
@@ -533,11 +539,86 @@ def delete_item(item_id: str, db: Session = Depends(get_db), user: models.User =
     )
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    # Tasks about this item stay, but now just point at its folder.
+    db.query(models.Task).filter(models.Task.owner_id == user.id, models.Task.item_id == item.id).update(
+        {"item_id": None}, synchronize_session=False
+    )
     db.delete(item)
     db.commit()
 
 
+# ----- checklists inside archive items -----
+
+MAX_CHECKLIST_PER_ITEM = 50
+
+
+def _get_owned_item(item_id: str, db: Session, user: models.User) -> models.Item:
+    item = (
+        db.query(models.Item)
+        .join(models.Folder)
+        .filter(models.Item.id == item_id, models.Folder.owner_id == user.id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+
+def _get_owned_entry(entry_id: str, db: Session, user: models.User) -> models.ChecklistEntry:
+    entry = (
+        db.query(models.ChecklistEntry)
+        .join(models.Item, models.ChecklistEntry.item_id == models.Item.id)
+        .join(models.Folder, models.Item.folder_id == models.Folder.id)
+        .filter(models.ChecklistEntry.id == entry_id, models.Folder.owner_id == user.id)
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Checklist line not found")
+    return entry
+
+
+@app.post("/items/{item_id}/checklist", response_model=schemas.ChecklistOut, status_code=status.HTTP_201_CREATED)
+def add_checklist_entry(item_id: str, payload: schemas.ChecklistCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    item = _get_owned_item(item_id, db, user)
+    count = db.query(func.count(models.ChecklistEntry.id)).filter(models.ChecklistEntry.item_id == item.id).scalar() or 0
+    if count >= MAX_CHECKLIST_PER_ITEM:
+        raise HTTPException(status_code=400, detail=f"A checklist can have at most {MAX_CHECKLIST_PER_ITEM} lines")
+    last = db.query(func.max(models.ChecklistEntry.position)).filter(models.ChecklistEntry.item_id == item.id).scalar()
+    entry = models.ChecklistEntry(item_id=item.id, text=payload.text, position=(last + 1) if last is not None else 0)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.patch("/checklist/{entry_id}", response_model=schemas.ChecklistOut)
+def update_checklist_entry(entry_id: str, payload: schemas.ChecklistUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    entry = _get_owned_entry(entry_id, db, user)
+    for field, value in payload.model_dump(exclude_unset=True, exclude_none=True).items():
+        setattr(entry, field, value)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.delete("/checklist/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_checklist_entry(entry_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    entry = _get_owned_entry(entry_id, db, user)
+    db.delete(entry)
+    db.commit()
+
+
 # ============================== TASKS ==============================
+
+def _resolve_task_link(db: Session, user: models.User, folder_id, item_id):
+    """Validates that the linked folder/item belongs to this user. An item implies its folder."""
+    if item_id:
+        item = _get_owned_item(item_id, db, user)
+        return item.folder_id, item.id
+    if folder_id:
+        return _get_owned_folder(folder_id, db, user).id, None
+    return None, None
+
 
 @app.get("/tasks", response_model=List[schemas.TaskOut])
 def list_tasks(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
@@ -546,8 +627,10 @@ def list_tasks(db: Session = Depends(get_db), user: models.User = Depends(auth.g
 
 @app.post("/tasks", response_model=schemas.TaskOut, status_code=status.HTTP_201_CREATED)
 def create_task(payload: schemas.TaskCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    folder_id, item_id = _resolve_task_link(db, user, payload.folder_id, payload.item_id)
     task = models.Task(
-        text=payload.text, priority=payload.priority, due_date=payload.due_date, owner_id=user.id
+        text=payload.text, priority=payload.priority, due_date=payload.due_date, owner_id=user.id,
+        folder_id=folder_id, item_id=item_id,
     )
     db.add(task)
     db.commit()
@@ -560,7 +643,10 @@ def update_task(task_id: str, payload: schemas.TaskUpdate, db: Session = Depends
     task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.owner_id == user.id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    for field, value in payload.dict(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    if "folder_id" in changes or "item_id" in changes:
+        task.folder_id, task.item_id = _resolve_task_link(db, user, changes.pop("folder_id", None), changes.pop("item_id", None))
+    for field, value in changes.items():
         setattr(task, field, value)
     db.commit()
     db.refresh(task)
@@ -1120,7 +1206,11 @@ def _erase_user_data(db: Session, user: models.User) -> None:
     )
 
     folder_ids = [r[0] for r in db.query(models.Folder.id).filter(models.Folder.owner_id == user.id).all()]
+    db.query(models.Task).filter(models.Task.owner_id == user.id).delete(synchronize_session=False)  # before folders/items they may point at
     if folder_ids:
+        item_ids = [r[0] for r in db.query(models.Item.id).filter(models.Item.folder_id.in_(folder_ids)).all()]
+        if item_ids:
+            db.query(models.ChecklistEntry).filter(models.ChecklistEntry.item_id.in_(item_ids)).delete(synchronize_session=False)
         db.query(models.Item).filter(models.Item.folder_id.in_(folder_ids)).delete(synchronize_session=False)
     conn = db.query(models.GoogleConnection).filter(models.GoogleConnection.user_id == user.id).first()
     if conn:
@@ -1188,6 +1278,8 @@ def export_my_data(request: Request, user: models.User = Depends(auth.get_curren
     """A machine-readable (JSON) copy of everything tied to this account."""
     folders = db.query(models.Folder).filter(models.Folder.owner_id == user.id).all()
     tasks = db.query(models.Task).filter(models.Task.owner_id == user.id).all()
+    folder_names = {f.id: f.name for f in folders}
+    item_titles = {i.id: i.title for f in folders for i in f.items}
     reminders = db.query(models.Reminder).filter(models.Reminder.owner_id == user.id).all()
     events = db.query(models.Event).filter(models.Event.owner_id == user.id).order_by(models.Event.start_time.asc()).all()
     sessions = db.query(models.StudySession).filter(models.StudySession.owner_id == user.id).order_by(models.StudySession.started_at.asc()).all()
@@ -1223,13 +1315,20 @@ def export_my_data(request: Request, user: models.User = Depends(auth.get_curren
                         "summary": i.summary,
                         "tags": [tag for tag in (i.tags or "").split(",") if tag],
                         "created_at": i.created_at,
+                        "checklist": [{"text": c.text, "done": bool(c.done)} for c in i.checklist],
                     }
                     for i in f.items
                 ],
             }
             for f in folders
         ],
-        "tasks": [{"text": t.text, "priority": t.priority, "done": t.done, "due_date": t.due_date} for t in tasks],
+        "tasks": [
+            {
+                "text": t.text, "priority": t.priority, "done": t.done, "due_date": t.due_date,
+                "linked_folder": folder_names.get(t.folder_id), "linked_item": item_titles.get(t.item_id),
+            }
+            for t in tasks
+        ],
         "reminders": [{"title": r.title, "detail": r.detail, "kind": r.kind} for r in reminders],
         "events": [
             {"title": e.title, "description": e.description, "start_time": e.start_time, "end_time": e.end_time, "color": e.color}

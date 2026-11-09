@@ -123,12 +123,49 @@ class Token(BaseModel):
 
 # ---------- Folders & Items ----------
 
+class ChecklistOut(BaseModel):
+    id: str
+    text: str
+    done: bool
+
+    class Config:
+        from_attributes = True
+
+
+class ChecklistCreate(BaseModel):
+    text: str = Field(max_length=500)
+
+    @field_validator("text")
+    @classmethod
+    def _text(cls, v: str) -> str:
+        v = " ".join(v.split())[:200]
+        if not v:
+            raise ValueError("Checklist line can't be empty")
+        return v
+
+
+class ChecklistUpdate(BaseModel):
+    text: Optional[str] = Field(default=None, max_length=500)
+    done: Optional[bool] = None
+
+    @field_validator("text")
+    @classmethod
+    def _text(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = " ".join(v.split())[:200]
+        if not v:
+            raise ValueError("Checklist line can't be empty")
+        return v
+
+
 class ItemOut(BaseModel):
     id: str
     title: str
     summary: str
     tags: List[str]
     created_at: datetime
+    checklist: List[ChecklistOut] = []
 
     class Config:
         from_attributes = True
@@ -251,6 +288,8 @@ class TaskCreate(BaseModel):
     text: str
     priority: Priority = "Medium"
     due_date: str = ""
+    folder_id: Optional[str] = Field(default=None, max_length=64)
+    item_id: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("due_date", mode="before")
     @classmethod
@@ -263,6 +302,9 @@ class TaskUpdate(BaseModel):
     priority: Optional[Priority] = None
     done: Optional[bool] = None
     due_date: Optional[str] = None
+    # Sending either of these replaces the task's archive link (send both as null to unlink).
+    folder_id: Optional[str] = Field(default=None, max_length=64)
+    item_id: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("due_date", mode="before")
     @classmethod
@@ -276,6 +318,8 @@ class TaskOut(BaseModel):
     priority: str
     done: bool
     due_date: str
+    folder_id: Optional[str] = None
+    item_id: Optional[str] = None
 
     class Config:
         from_attributes = True

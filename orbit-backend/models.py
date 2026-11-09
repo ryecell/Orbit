@@ -118,6 +118,23 @@ class Item(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     folder = relationship("Folder", back_populates="items")
+    checklist = relationship(
+        "ChecklistEntry", cascade="all, delete-orphan", order_by="ChecklistEntry.position", back_populates="item"
+    )
+
+
+class ChecklistEntry(Base):
+    """A quick check-off line inside an archive item (lighter than a Task: no priority or deadline)."""
+    __tablename__ = "checklist_entries"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    item_id = Column(String, ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    text = Column(String, nullable=False)
+    done = Column(Boolean, default=False, nullable=False)
+    position = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    item = relationship("Item", back_populates="checklist")
 
 
 class Task(Base):
@@ -129,6 +146,9 @@ class Task(Base):
     done = Column(Boolean, default=False)
     due_date = Column(String, default="")
     owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # Optional link to the archive: a whole folder, or one item inside it (then folder_id is that item's folder).
+    folder_id = Column(String, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True, index=True)
+    item_id = Column(String, ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True)
 
     owner = relationship("User", back_populates="tasks")
 

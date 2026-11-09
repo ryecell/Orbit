@@ -1399,11 +1399,117 @@ function ArchiveScreen({ folderList, go, onCreate, onUpdate, onDelete, onMove })
   );
 }
 
-function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, onDelete }) {
+
+const checklistApi = {
+  add: (itemId, text) => accountRequest(`/items/${itemId}/checklist`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) }).then((r) => r.json()),
+  update: (id, body) => accountRequest(`/checklist/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
+  remove: (id) => accountRequest(`/checklist/${id}`, { method: "DELETE" }),
+};
+
+// "f:<folderId>" / "i:<itemId>" <-> the {folder_id, item_id} the API wants.
+function linkValueOf(task) { return task.item_id ? `i:${task.item_id}` : task.folder_id ? `f:${task.folder_id}` : ""; }
+function linkPayload(value) {
+  if (!value) return { folder_id: null, item_id: null };
+  return value.startsWith("i:") ? { item_id: value.slice(2), folder_id: null } : { folder_id: value.slice(2), item_id: null };
+}
+function describeLink(folderList, task) {
+  for (const f of folderList) {
+    if (task.item_id) { const it = f.items.find((i) => i.id === task.item_id); if (it) return { folder: f, label: it.title, isItem: true }; }
+    else if (task.folder_id === f.id) return { folder: f, label: f.name, isItem: false };
+  }
+  return null;
+}
+
+function LinkSelect({ folderList, value, onChange, style }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label="Link to archive" style={{ ...inputStyle, padding: "7px 11px", fontSize: 13, borderRadius: 11, width: "auto", maxWidth: "100%", ...style }}>
+      <option value="">No link</option>
+      {folderList.map((f) => (
+        <optgroup key={f.id} label={f.name}>
+          <option value={`f:${f.id}`}>Whole folder — {f.name}</option>
+          {f.items.map((it) => <option key={it.id} value={`i:${it.id}`}>{it.title}</option>)}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
+function MiniAdd({ placeholder, onAdd, max = 200 }) {
+  const [v, setV] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    const text = v.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    try { await onAdd(text); setV(""); } catch { /* the caller shows the error */ } finally { setBusy(false); }
+  }
+  return (
+    <div style={{ display: "flex", gap: 6, width: "100%" }}>
+      <input value={v} maxLength={max} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder={placeholder} style={{ ...inputStyle, padding: "7px 11px", fontSize: 13, borderRadius: 11 }} />
+      <button onClick={submit} disabled={busy || !v.trim()} aria-label="Add" style={{ ...iconBtnStyle, opacity: busy || !v.trim() ? 0.5 : 1 }}><Plus size={15} color={T.primary} /></button>
+    </div>
+  );
+}
+
+function MiniTaskRow({ task, onToggle }) {
+  return (
+    <div onClick={() => onToggle(task)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "3px 0" }}>
+      {task.done ? <CheckSquare size={16} color={T.primary} /> : <Square size={16} color={T.inkFaint} />}
+      <span style={{ fontSize: 13, color: task.done ? T.inkFaint : T.ink, textDecoration: task.done ? "line-through" : "none", flex: 1, overflowWrap: "anywhere" }}>{task.text}</span>
+      <PriorityTag p={task.priority} />
+    </div>
+  );
+}
+
+// Collapsible "Checklist + Tasks" area on an archive item.
+function ItemExtras({ item, tasks, onAddCheck, onToggleCheck, onDeleteCheck, onToggleTask, onAddTask }) {
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState("");
+  const list = item.checklist || [];
+  const doneCount = list.filter((c) => c.done).length;
+  const openTasks = tasks.filter((t) => !t.done).length;
+  const guard = (fn) => async (...a) => { setErr(""); try { return await fn(...a); } catch (e) { setErr(e.message || "Something went wrong."); throw e; } };
+  return (
+    <div style={{ width: "100%" }}>
+      <button onClick={() => setOpen((o) => !o)} style={{ background: T.primarySoft, border: "none", borderRadius: 10, padding: "7px 11px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: T.primary, display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left" }}>
+        <CheckSquare size={14} />
+        <span style={{ flex: 1 }}>
+          {list.length ? `Checklist ${doneCount}/${list.length}` : "Checklist"}{tasks.length ? ` · ${openTasks} open task${openTasks === 1 ? "" : "s"}` : ""}
+        </span>
+        <ChevronDown size={14} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+          <ErrorBanner message={err} />
+          {list.length > 0 && (
+            <div style={{ height: 5, borderRadius: 99, background: T.line, overflow: "hidden" }}>
+              <div style={{ width: `${(doneCount / list.length) * 100}%`, height: "100%", background: T.primary, transition: "width .25s" }} />
+            </div>
+          )}
+          {list.map((c) => (
+            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
+              <span onClick={() => guard(onToggleCheck)(item.id, c)} style={{ cursor: "pointer", display: "flex" }}>{c.done ? <CheckSquare size={16} color={T.primary} /> : <Square size={16} color={T.inkFaint} />}</span>
+              <span style={{ flex: 1, fontSize: 13, color: c.done ? T.inkFaint : T.ink, textDecoration: c.done ? "line-through" : "none", overflowWrap: "anywhere" }}>{c.text}</span>
+              <X size={14} color={T.inkFaint} style={{ cursor: "pointer" }} aria-label="Remove line" onClick={() => guard(onDeleteCheck)(item.id, c.id)} />
+            </div>
+          ))}
+          <MiniAdd placeholder="Add a checklist line…" onAdd={guard((text) => onAddCheck(item.id, text))} />
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: T.inkSoft, marginTop: 6 }}>Tasks for this item</div>
+          {tasks.length === 0 && <div style={{ fontSize: 12, color: T.inkFaint }}>No tasks linked yet. Tasks have priorities and deadlines and also appear in My Tasks.</div>}
+          {tasks.map((t) => <MiniTaskRow key={t.id} task={t} onToggle={onToggleTask} />)}
+          <MiniAdd placeholder="Add a task for this item…" onAdd={guard((text) => onAddTask(text, "Medium", "", { item_id: item.id }))} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, onDelete, tasks = [], onToggleTask, onAddTask, onAddCheck, onToggleCheck, onDeleteCheck }) {
   const [editing, setEditing] = useState(false);
   const meta = folderMeta(folder || { name });
   const Icon = meta.icon;
   const items = folder ? folder.items : [];
+  const folderTasks = folder ? tasks.filter((t) => t.folder_id === folder.id && !t.item_id) : [];
   return (
     <div>
       <TopBar
@@ -1416,6 +1522,14 @@ function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, on
           <div style={{ ...iconTileStyle, background: `${meta.color}1A`, color: meta.color }}><Icon size={18} /></div>
           <div style={{ fontSize: 13, color: T.inkSoft }}>{items.length} items in this folder</div>
         </div>
+        {folder && (
+          <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>Tasks for this folder</div>
+            {folderTasks.length === 0 && <div style={{ fontSize: 12, color: T.inkFaint }}>Nothing to do yet — add something like “review before Friday”.</div>}
+            {folderTasks.map((t) => <MiniTaskRow key={t.id} task={t} onToggle={onToggleTask} />)}
+            <MiniAdd placeholder="Add a task for this folder…" onAdd={(text) => onAddTask(text, "Medium", "", { folder_id: folder.id })} />
+          </div>
+        )}
         {items.length === 0 && <div style={{ textAlign: "center", padding: "40px 10px", color: T.inkFaint, fontSize: 13.5 }}>Nothing here yet. Capture a photo or note to add your first item.</div>}
         <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {items.map((it) => (
@@ -1428,6 +1542,7 @@ function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, on
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {it.tags.map((tg) => <Chip key={tg} color={meta.color}>{tg}</Chip>)}
             </div>
+            <ItemExtras item={it} tasks={tasks.filter((t) => t.item_id === it.id)} onAddCheck={onAddCheck} onToggleCheck={onToggleCheck} onDeleteCheck={onDeleteCheck} onToggleTask={onToggleTask} onAddTask={onAddTask} />
           </div>
         ))}
         </div>
@@ -1711,12 +1826,13 @@ function CalendarScreen({ back, events, onAddEvent, onDeleteEvent, google, onCon
   );
 }
 
-function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onSetDueDate, onDelete }) {
+function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onSetDueDate, onDelete, folderList = [], onSetLink, go }) {
   const [filter, setFilter] = useState("All");
   const [sort, setSort] = useState("Newest"); // "Newest" | "Priority" | "Deadline"
   const [draft, setDraft] = useState("");
   const [draftDue, setDraftDue] = useState("");
   const [draftPriority, setDraftPriority] = useState("Medium");
+  const [draftLink, setDraftLink] = useState("");
   const [openId, setOpenId] = useState(null); // task whose priority picker is showing
   const [confirmId, setConfirmId] = useState(null); // task waiting for a second tap to delete
 
@@ -1738,7 +1854,7 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onSetDueDate,
 
   async function addTask() {
     if (!draft.trim()) return;
-    await onAdd(draft.trim(), draftPriority, draftDue);
+    await onAdd(draft.trim(), draftPriority, draftDue, draftLink ? linkPayload(draftLink) : undefined);
     setDraft("");
     setDraftDue("");
   }
@@ -1780,6 +1896,14 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onSetDueDate,
                     </button>
                   ) : null;
                 })()}
+                {(() => {
+                  const link = describeLink(folderList, t);
+                  return link ? (
+                    <button onClick={(e) => { e.stopPropagation(); go && go("folder", link.folder.name); }} title="Open in Archive" style={{ background: T.primarySoft, border: "none", borderRadius: 999, padding: "3px 9px", marginTop: 5, marginRight: 6, cursor: "pointer", fontSize: 11.5, fontWeight: 700, color: T.primary, display: "inline-flex", alignItems: "center", gap: 5, maxWidth: "100%" }}>
+                      <FolderOpen size={12} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{link.isItem ? `${link.folder.name} › ${link.label}` : link.label}</span>
+                    </button>
+                  ) : null;
+                })()}
                 {openId === t.id && (
                   <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
                     <PriorityChips
@@ -1801,6 +1925,12 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onSetDueDate,
                       )}
                       <button onClick={() => setOpenId(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, color: T.primary, padding: 0, marginLeft: "auto" }}>Done</button>
                     </div>
+                    {folderList.length > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: T.inkSoft }}>Archive link</span>
+                        <LinkSelect folderList={folderList} value={linkValueOf(t)} onChange={(v) => onSetLink(t, v)} style={{ padding: "5px 9px", fontSize: 12.5 }} />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1840,6 +1970,12 @@ function TodoScreen({ tasks, back, onToggle, onAdd, onSetPriority, onSetDueDate,
             <input type="date" value={draftDue} onChange={(e) => setDraftDue(e.target.value)} aria-label="New task deadline" style={{ ...inputStyle, width: "auto", padding: "7px 11px", fontSize: 13, borderRadius: 11 }} />
             {draftDue && <button onClick={() => setDraftDue("")} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, color: T.inkSoft, padding: 0 }}>Clear</button>}
           </div>
+          {folderList.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>Link to archive <span style={{ fontWeight: 500, color: T.inkFaint }}>(optional)</span></span>
+              <LinkSelect folderList={folderList} value={draftLink} onChange={setDraftLink} />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -3468,6 +3604,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   async function deleteItem(itemId) {
   if (!window.confirm("Delete this item? This can't be undone.")) return;
   await api.items.delete(itemId);
+  api.tasks.list().then(setTasks).catch(() => {}); // tasks about this item lose their link
   setFolderList((prev) => prev.map((f) => (f.name === activeFolder ? { ...f, items: f.items.filter((i) => i.id !== itemId) } : f)));
 }
 
@@ -3488,6 +3625,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   async function deleteFolder(id) {
     await folderApi.remove(id);
     setFolderList((prev) => prev.filter((f) => f.id !== id));
+    api.tasks.list().then(setTasks).catch(() => {}); // tasks about this folder lose their link
   }
 
   async function moveFolder(id, direction) {
@@ -3511,8 +3649,8 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
   }
 
-  async function addTask(text, priority = "Medium", dueDate = "") {
-    const created = await api.tasks.create({ text, priority, due_date: dueDate || "" });
+  async function addTask(text, priority = "Medium", dueDate = "", link) {
+    const created = await api.tasks.create({ text, priority, due_date: dueDate || "", ...(link || {}) });
     setTasks((prev) => [created, ...prev]);
   }
 
@@ -3535,6 +3673,37 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
       setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, priority: task.priority } : t)));
       setInviteNotice(err.message || "Couldn't change that task's priority.");
     }
+  }
+
+  async function setTaskLink(task, value) {
+    try {
+      const updated = await api.tasks.update(task.id, linkPayload(value));
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    } catch (err) {
+      setInviteNotice(err.message || "Couldn't change that task's link.");
+    }
+  }
+
+  // ---- checklist lines inside archive items ----
+  function patchItem(itemId, fn) {
+    setFolderList((prev) => prev.map((f) => (f.items.some((i) => i.id === itemId) ? { ...f, items: f.items.map((i) => (i.id === itemId ? fn(i) : i)) } : f)));
+  }
+  async function addChecklistLine(itemId, text) {
+    const entry = await checklistApi.add(itemId, text);
+    patchItem(itemId, (i) => ({ ...i, checklist: [...(i.checklist || []), entry] }));
+  }
+  async function toggleChecklistLine(itemId, entry) {
+    patchItem(itemId, (i) => ({ ...i, checklist: i.checklist.map((c) => (c.id === entry.id ? { ...c, done: !c.done } : c)) })); // optimistic
+    try {
+      await checklistApi.update(entry.id, { done: !entry.done });
+    } catch (err) {
+      patchItem(itemId, (i) => ({ ...i, checklist: i.checklist.map((c) => (c.id === entry.id ? { ...c, done: entry.done } : c)) }));
+      throw err;
+    }
+  }
+  async function deleteChecklistLine(itemId, entryId) {
+    await checklistApi.remove(entryId);
+    patchItem(itemId, (i) => ({ ...i, checklist: i.checklist.filter((c) => c.id !== entryId) }));
   }
 
   async function setTaskDueDate(task, due_date) {
@@ -3674,10 +3843,10 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     switch (screen) {
       case "home": return <HomeScreen folderList={folderList} tasks={tasks} go={go} user={user} />;
       case "archive": return <ArchiveScreen folderList={folderList} go={go} onCreate={createFolder} onUpdate={updateFolder} onDelete={deleteFolder} onMove={moveFolder} />;
-      case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} onUpdate={updateFolder} onDelete={deleteFolder} />;
+      case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} onUpdate={updateFolder} onDelete={deleteFolder} tasks={tasks} onToggleTask={toggleTask} onAddTask={addTask} onAddCheck={addChecklistLine} onToggleCheck={toggleChecklistLine} onDeleteCheck={deleteChecklistLine} />;
       case "capture": return <CaptureScreen back={() => setScreen("home")} onSave={saveItem} folders={folders} />;
       case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} google={google} onConnectGoogle={connectGoogle} onSyncGoogle={syncGoogleNow} />;
-      case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} onSetPriority={setTaskPriority} onSetDueDate={setTaskDueDate} onDelete={deleteTask} />;
+      case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} onSetPriority={setTaskPriority} onSetDueDate={setTaskDueDate} onDelete={deleteTask} folderList={folderList} onSetLink={setTaskLink} go={go} />;
       case "groupslist":
         return isDesktop
           ? <GroupsWorkspace groups={groups} activeGroup={activeGroup} user={user} go={go} onCreate={createGroup} onJoin={joinGroup} />
