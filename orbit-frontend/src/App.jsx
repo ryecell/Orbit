@@ -664,14 +664,14 @@ This is a summary for in-app display. The full Terms of Service document governs
   },
   privacy: {
     title: "Privacy Policy",
-    body: `Last updated: November 8, 2026
+    body: `Last updated: November 9, 2026
 
 This explains what Orbit collects and how we use it. The data controller for Orbit is the operator of this service, contactable at ryecellz23@gmail.com.
 
 # What we collect
 Account info: username (required), password (hashed, never stored in plain text), and full name, email and profile picture (all optional). A profile picture is resized to a small square copy before it is stored; the original you picked is not kept. It is visible to you, your friends and people who share a group with you (never to someone you have blocked), and it is deleted when you remove it or delete your account. Your date of birth is checked at signup only to verify you meet the minimum age, and is not stored.
 
-Your content: folders, archive items (including photos you upload), tasks, reminders, calendar events, study session logs, group messages, and — if you use the friends feature — your friend list, friend requests, people you have blocked, and direct messages.
+Your content: folders, archive items (including photos you upload), tasks, reminders, calendar events, study session logs, group messages, your grades (subjects, scores and grading settings, if you use the grades tracker — private to you and never shown to friends or groups), and — if you use the friends feature — your friend list, friend requests, people you have blocked, and direct messages.
 
 Direct messages can only be sent between accepted friends. They are stored on our servers (not end-to-end encrypted), are visible only to the two people in the conversation, and are not read by us except where needed to investigate abuse or comply with the law.
 
@@ -1163,10 +1163,11 @@ function HomeScreen({ folderList, tasks, go, user }) {
 
       <div style={{ padding: "20px 20px 0" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginBottom: 10 }}>Quick actions</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
           <QuickAction icon={Camera} label="Camera" tint={T.primary} onClick={() => go("capture")} />
           <QuickAction icon={ListTodo} label="To-Do" tint={T.accent} onClick={() => go("todo")} />
           <QuickAction icon={CalendarIcon} label="Calendar" tint={T.teal} onClick={() => go("calendar")} />
+          <QuickAction icon={GraduationCap} label="Grades" tint={T.primary} onClick={() => go("grades")} />
           <QuickAction icon={BarChart3} label="Insights" tint={T.coral} onClick={() => go("insights")} />
         </div>
       </div>
@@ -3457,9 +3458,348 @@ function GroupMembersPanel({ groupId, me, onOpenProfile }) {
   );
 }
 
+// ---- Grades tracker --------------------------------------------------------------
+const gjson = (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const gradesApi = {
+  get: () => accountRequest("/grades").then((r) => r.json()),
+  setSettings: (b) => accountRequest("/grades/settings", gjson("PUT", b)).then((r) => r.json()),
+  addSubject: (b) => accountRequest("/grades/subjects", gjson("POST", b)).then((r) => r.json()),
+  patchSubject: (id, b) => accountRequest(`/grades/subjects/${id}`, gjson("PATCH", b)).then((r) => r.json()),
+  delSubject: (id) => accountRequest(`/grades/subjects/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  addCategory: (id, b) => accountRequest(`/grades/subjects/${id}/categories`, gjson("POST", b)).then((r) => r.json()),
+  delCategory: (id) => accountRequest(`/grades/categories/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  addEntry: (id, b) => accountRequest(`/grades/subjects/${id}/entries`, gjson("POST", b)).then((r) => r.json()),
+  delEntry: (id) => accountRequest(`/grades/entries/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  needed: (id, q) => accountRequest(`/grades/subjects/${id}/needed?${new URLSearchParams(q)}`).then((r) => r.json()),
+};
+
+const GRADE_SCALES = [
+  { key: "1-5", title: "1.0 – 5.0", hint: "1.0 is the best grade, 5.0 fails (common in the Philippines)" },
+  { key: "5-1", title: "5.0 – 1.0", hint: "5.0 is the best grade, 1.0 fails" },
+  { key: "percent", title: "Percentage", hint: "0 – 100%" },
+  { key: "gpa4", title: "4.0 GPA", hint: "4.0 is the best grade, 0.0 fails" },
+];
+
+function formatGrade(scale, g) {
+  if (g === null || g === undefined || Number.isNaN(g)) return "—";
+  return scale === "percent" ? `${Number(g).toFixed(1)}%` : Number(g).toFixed(2);
+}
+const fmtPct = (p) => (p === null || p === undefined ? "—" : `${Number(p).toFixed(1)}%`);
+const numOrNull = (v) => { const n = parseFloat(String(v).replace(",", ".")); return Number.isFinite(n) ? n : null; };
+
+function ScaleSetup({ onChoose, busy }) {
+  const [scale, setScale] = useState("1-5");
+  const [passing, setPassing] = useState("");
+  const defaults = { "1-5": 75, "5-1": 75, percent: 75, gpa4: 65 };
+  return (
+    <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 12, padding: 18 }}>
+      <div style={{ fontSize: 16, fontWeight: 800, color: T.ink }}>What grading system does your school use?</div>
+      <div style={{ fontSize: 12.5, color: T.inkFaint }}>You can change this any time — your scores are saved as points, so nothing is lost.</div>
+      {GRADE_SCALES.map((s) => (
+        <label key={s.key} style={{ display: "flex", gap: 10, alignItems: "flex-start", border: `1.5px solid ${scale === s.key ? T.primary : T.line}`, borderRadius: 12, padding: "10px 12px", cursor: "pointer", background: scale === s.key ? T.primarySoft : T.panel }}>
+          <input type="radio" name="scale" checked={scale === s.key} onChange={() => setScale(s.key)} style={{ marginTop: 3 }} />
+          <span><span style={{ fontWeight: 700, color: T.ink, fontSize: 14 }}>{s.title}</span><br /><span style={{ fontSize: 12, color: T.inkFaint }}>{s.hint}</span></span>
+        </label>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>Passing mark (%)</span>
+        <input value={passing} onChange={(e) => setPassing(e.target.value)} placeholder={String(defaults[scale])} inputMode="decimal" style={{ ...inputStyle, width: 90, padding: "7px 11px", fontSize: 13 }} />
+        <span style={{ fontSize: 11.5, color: T.inkFaint }}>Used to tell you if you're passing. Check your school's rule.</span>
+      </div>
+      <button disabled={busy} onClick={() => onChoose({ scale, passing_percent: numOrNull(passing) ?? undefined })} style={primaryBtn}>{busy ? <OrbitSpinner size={14} color="#fff" /> : "Continue"}</button>
+    </div>
+  );
+}
+
+function GradeSettingsModal({ settings, onClose, onSave }) {
+  const [scale, setScale] = useState(settings.scale);
+  const [passing, setPassing] = useState(String(settings.passing_percent ?? 75));
+  const [rows, setRows] = useState((settings.table || []).map((r) => ({ min: String(r.min), grade: String(r.grade) })));
+  const [dirty, setDirty] = useState(false);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const scaleChanged = scale !== settings.scale;
+
+  async function save() {
+    setErr(""); setBusy(true);
+    try {
+      const body = { scale, passing_percent: numOrNull(passing) ?? undefined };
+      if (dirty && !scaleChanged && scale !== "percent") body.table = rows.map((r) => ({ min: numOrNull(r.min), grade: numOrNull(r.grade) }));
+      await onSave(body);
+      onClose();
+    } catch (e) { setErr(e.message || "Couldn't save."); setBusy(false); }
+  }
+  const cell = { ...inputStyle, padding: "6px 9px", fontSize: 13, width: 80 };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,24,17,.55)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.panel, borderRadius: 18, padding: 18, width: "100%", maxWidth: 440, maxHeight: "88vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: T.ink }}>Grading settings</div>
+          <X size={18} color={T.inkFaint} style={{ cursor: "pointer" }} onClick={onClose} />
+        </div>
+        <ErrorBanner message={err} />
+        <select value={scale} onChange={(e) => setScale(e.target.value)} style={inputStyle} aria-label="Grading scale">
+          {GRADE_SCALES.map((s) => <option key={s.key} value={s.key}>{s.title} — {s.hint}</option>)}
+        </select>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>Passing mark (%)</span>
+          <input value={passing} onChange={(e) => setPassing(e.target.value)} inputMode="decimal" style={{ ...inputStyle, width: 90, padding: "7px 11px", fontSize: 13 }} />
+        </div>
+        {scaleChanged && <div style={{ fontSize: 12, color: T.inkFaint }}>Switching scale uses that scale's standard conversion table. You can edit it afterwards.</div>}
+        {!scaleChanged && scale !== "percent" && (
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft, marginBottom: 6 }}>Conversion table</div>
+            <div style={{ fontSize: 11.5, color: T.inkFaint, marginBottom: 8 }}>Schools differ. A score at or above the percent earns that grade. The last row must start at 0%.</div>
+            {rows.map((r, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                <input value={r.min} inputMode="decimal" aria-label="Minimum percent" onChange={(e) => { setDirty(true); setRows(rows.map((x, j) => (j === i ? { ...x, min: e.target.value } : x))); }} style={cell} />
+                <span style={{ fontSize: 12, color: T.inkFaint }}>% and up →</span>
+                <input value={r.grade} inputMode="decimal" aria-label="Grade" onChange={(e) => { setDirty(true); setRows(rows.map((x, j) => (j === i ? { ...x, grade: e.target.value } : x))); }} style={cell} />
+                {rows.length > 2 && <X size={15} color={T.inkFaint} style={{ cursor: "pointer" }} onClick={() => { setDirty(true); setRows(rows.filter((_, j) => j !== i)); }} />}
+              </div>
+            ))}
+            {rows.length < 20 && <button onClick={() => { setDirty(true); setRows([...rows, { min: "", grade: "" }]); }} style={smallBtn}><Plus size={13} /> Add row</button>}
+          </div>
+        )}
+        <button onClick={save} disabled={busy} style={primaryBtn}>{busy ? <OrbitSpinner size={14} color="#fff" /> : "Save"}</button>
+      </div>
+    </div>
+  );
+}
+
+function GradeSubjectView({ subject, settings, folderList, go, back, run, setErr }) {
+  const scale = settings.scale;
+  const weighted = subject.categories.some((c) => c.weight > 0);
+  const [catName, setCatName] = useState("");
+  const [catWeight, setCatWeight] = useState("");
+  const [title, setTitle] = useState("");
+  const [score, setScore] = useState("");
+  const [total, setTotal] = useState("");
+  const [entryCat, setEntryCat] = useState("");
+  const [entryDate, setEntryDate] = useState("");
+  const [finalGrade, setFinalGrade] = useState("");
+  const [target, setTarget] = useState("");
+  const [calcCat, setCalcCat] = useState("");
+  const [calcPoints, setCalcPoints] = useState("100");
+  const [calc, setCalc] = useState(null);
+  const passing = subject.percent !== null && subject.percent >= (settings.passing_percent ?? 75);
+  const weightSum = subject.categories.reduce((a, c) => a + c.weight, 0);
+  const folder = folderList.find((f) => f.id === subject.folder_id);
+
+  async function calculate() {
+    setErr(""); setCalc(null);
+    const t = numOrNull(target);
+    if (t === null) { setErr("Enter the grade you're aiming for."); return; }
+    const q = { target_grade: t };
+    if (weighted) { if (!calcCat) { setErr("Pick the category that's still to come, e.g. your final exam."); return; } q.category_id = calcCat; }
+    else q.points = numOrNull(calcPoints) || 100;
+    try { setCalc({ ...(await gradesApi.needed(subject.id, q)), t, weighted, catName: subject.categories.find((c) => c.id === calcCat)?.name }); }
+    catch (e) { setErr(e.message || "Couldn't calculate."); }
+  }
+
+  const section = (label) => <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>{label}</div>;
+  const mini = { ...inputStyle, padding: "7px 11px", fontSize: 13, borderRadius: 11 };
+
+  return (
+    <div>
+      <TopBar title={subject.name} onBack={back} right={
+        <button aria-label="Delete subject" style={iconBtnStyle} onClick={() => { if (window.confirm(`Delete ${subject.name} and all its scores?`)) run(() => gradesApi.delSubject(subject.id)).then(back); }}><Trash2 size={15} color={T.danger} /></button>
+      } />
+      <div className="orbit-stagger" style={screenBox}>
+        <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", gap: 4, padding: "20px 16px" }}>
+          <div style={{ fontSize: 34, fontWeight: 800, color: subject.percent === null ? T.inkFaint : passing ? T.primary : T.danger }}>{formatGrade(scale, subject.grade)}</div>
+          <div style={{ fontSize: 13, color: T.inkSoft }}>{scale !== "percent" ? `${fmtPct(subject.percent)} · ` : ""}{subject.units} unit{subject.units === 1 ? "" : "s"}</div>
+          {subject.percent !== null && <span style={{ fontSize: 12, fontWeight: 700, color: passing ? T.primary : T.danger }}>{passing ? "Passing" : "Below the passing mark"}</span>}
+          {subject.has_final_override ? (
+            <button style={{ ...smallBtn, marginTop: 8 }} onClick={() => run(() => gradesApi.patchSubject(subject.id, { final_grade: null }))}>Entered manually — use my scores instead</button>
+          ) : (
+            <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+              <input value={finalGrade} onChange={(e) => setFinalGrade(e.target.value)} placeholder="Final grade given" inputMode="decimal" style={{ ...mini, width: 130 }} aria-label="Final grade given by your school" />
+              <button style={smallBtn} disabled={numOrNull(finalGrade) === null} onClick={() => run(() => gradesApi.patchSubject(subject.id, { final_grade: numOrNull(finalGrade) })).then(() => setFinalGrade(""))}>Set</button>
+            </div>
+          )}
+        </div>
+
+        <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+          {section("Grade categories (optional)")}
+          <div style={{ fontSize: 11.5, color: T.inkFaint }}>Add weights like Quizzes 20%, Exams 40%, Final 40% if your teacher grades that way.</div>
+          {subject.categories.map((c) => (
+            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ flex: 1, fontSize: 13.5, color: T.ink, fontWeight: 600 }}>{c.name} <span style={{ color: T.inkFaint, fontWeight: 500 }}>· {c.weight}%</span></span>
+              <span style={{ fontSize: 12.5, color: T.inkSoft }}>{fmtPct(c.percent)}</span>
+              <X size={15} color={T.inkFaint} style={{ cursor: "pointer" }} aria-label="Remove category" onClick={() => run(() => gradesApi.delCategory(c.id))} />
+            </div>
+          ))}
+          {subject.categories.length > 0 && weightSum !== 100 && weighted && <div style={{ fontSize: 11.5, color: T.accent }}>Weights add up to {weightSum}% — usually they total 100%.</div>}
+          <div style={{ display: "flex", gap: 6 }}>
+            <input value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="Category name" style={mini} />
+            <input value={catWeight} onChange={(e) => setCatWeight(e.target.value)} placeholder="Weight %" inputMode="decimal" style={{ ...mini, width: 90 }} />
+            <button style={iconBtnStyle} aria-label="Add category" disabled={!catName.trim()} onClick={() => run(() => gradesApi.addCategory(subject.id, { name: catName, weight: numOrNull(catWeight) ?? 0 })).then(() => { setCatName(""); setCatWeight(""); })}><Plus size={15} color={T.primary} /></button>
+          </div>
+        </div>
+
+        <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+          {section("Scores")}
+          {subject.entries.length === 0 && <div style={{ fontSize: 12.5, color: T.inkFaint }}>No scores yet. Add your first quiz or exam below.</div>}
+          {subject.entries.map((e) => (
+            <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: T.ink, overflowWrap: "anywhere" }}>{e.title}</div>
+                <div style={{ fontSize: 11.5, color: T.inkFaint }}>{subject.categories.find((c) => c.id === e.category_id)?.name || (weighted ? "No category (not counted)" : "")}{e.date ? ` · ${e.date}` : ""}</div>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft }}>{e.score}/{e.total} <span style={{ fontWeight: 500, color: T.inkFaint }}>({fmtPct((e.score / e.total) * 100)})</span></span>
+              <X size={15} color={T.inkFaint} style={{ cursor: "pointer" }} aria-label="Delete score" onClick={() => run(() => gradesApi.delEntry(e.id))} />
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Quiz 1" style={{ ...mini, flex: "1 1 140px" }} />
+            <input value={score} onChange={(e) => setScore(e.target.value)} placeholder="Score" inputMode="decimal" style={{ ...mini, width: 80 }} />
+            <span style={{ alignSelf: "center", color: T.inkFaint }}>/</span>
+            <input value={total} onChange={(e) => setTotal(e.target.value)} placeholder="Out of" inputMode="decimal" style={{ ...mini, width: 80 }} />
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            {subject.categories.length > 0 && (
+              <select value={entryCat} onChange={(e) => setEntryCat(e.target.value)} style={{ ...mini, width: "auto" }} aria-label="Category">
+                <option value="">{weighted ? "Pick a category" : "No category"}</option>
+                {subject.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
+            <input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} aria-label="Date" style={{ ...mini, width: "auto" }} />
+            <button style={{ ...primaryBtn, padding: "8px 16px", marginLeft: "auto" }} disabled={!title.trim() || numOrNull(score) === null || !(numOrNull(total) > 0)}
+              onClick={() => run(() => gradesApi.addEntry(subject.id, { title, score: numOrNull(score), total: numOrNull(total), category_id: entryCat || null, date: entryDate })).then(() => { setTitle(""); setScore(""); setTotal(""); setEntryDate(""); })}>
+              <Plus size={15} /> Add score
+            </button>
+          </div>
+        </div>
+
+        <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+          {section("What do I need?")}
+          <div style={{ fontSize: 11.5, color: T.inkFaint }}>Aiming for a grade? See what you need on what's left.</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={scale === "percent" ? "Target, e.g. 90" : "Target, e.g. 2.0"} inputMode="decimal" style={{ ...mini, width: 150 }} aria-label="Target grade" />
+            {weighted ? (
+              <select value={calcCat} onChange={(e) => setCalcCat(e.target.value)} style={{ ...mini, width: "auto" }} aria-label="Category still to come">
+                <option value="">Still to come…</option>
+                {subject.categories.filter((c) => c.weight > 0).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            ) : (
+              <><span style={{ fontSize: 12, color: T.inkSoft }}>Next one is out of</span><input value={calcPoints} onChange={(e) => setCalcPoints(e.target.value)} inputMode="decimal" style={{ ...mini, width: 80 }} aria-label="Points of the next assessment" /></>
+            )}
+            <button style={smallPrimary} onClick={calculate}>Calculate</button>
+          </div>
+          {calc && (
+            <div style={{ background: T.primarySoft, borderRadius: 12, padding: "10px 12px", fontSize: 13.5, color: T.ink }}>
+              {calc.secured ? <>You've already secured a {formatGrade(scale, calc.t)} — any score keeps it.</>
+                : calc.possible ? <>You need about <b>{fmtPct(calc.needed_percent)}</b>{scale !== "percent" ? <> (≈ {formatGrade(scale, calc.needed_grade)})</> : null} {calc.weighted ? <>on <b>{calc.catName}</b></> : <>on the next assessment</>} to reach {formatGrade(scale, calc.t)}.</>
+                : <>Reaching {formatGrade(scale, calc.t)} isn't possible any more — you'd need {fmtPct(calc.needed_percent)}. Try a lower target.</>}
+            </div>
+          )}
+        </div>
+
+        <div className="orbit-card" style={{ ...rowCardStyle, alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <FolderOpen size={16} color={T.primary} />
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>Archive folder</span>
+          <select value={subject.folder_id || ""} onChange={(e) => run(() => gradesApi.patchSubject(subject.id, { folder_id: e.target.value || null }))} style={{ ...mini, width: "auto", flex: 1, minWidth: 120 }} aria-label="Linked archive folder">
+            <option value="">Not linked</option>
+            {folderList.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+          {folder && <button style={smallBtn} onClick={() => go("folder", folder.name)}>Open</button>}
+        </div>
+        <div style={{ fontSize: 11.5, color: T.inkFaint, textAlign: "center" }}>Your grades are private — never shown to friends or groups. Estimates only; your school's records are official.</div>
+      </div>
+    </div>
+  );
+}
+
+function GradesScreen({ back, folderList, go }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [openId, setOpenId] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [units, setUnits] = useState("3");
+
+  useEffect(() => {
+    let off = false;
+    gradesApi.get().then((d) => !off && setData(d)).catch((e) => !off && setErr(e.message || "Couldn't load your grades."));
+    return () => { off = true; };
+  }, []);
+
+  // Runs a mutation that returns a fresh snapshot.
+  async function run(fn) {
+    setErr(""); setBusy(true);
+    try { const d = await fn(); setData(d); return d; }
+    catch (e) { setErr(e.message || "Something went wrong."); throw e; }
+    finally { setBusy(false); }
+  }
+  const safeRun = (fn) => run(fn).catch(() => {});
+
+  if (!data) return <div><TopBar title="Grades" onBack={back} />{err ? <div style={screenBox}><ErrorBanner message={err} /></div> : <CenterSpinner label="Loading your grades…" />}</div>;
+
+  const settings = data.settings;
+  const scale = settings.scale;
+  if (!scale) {
+    return (
+      <div>
+        <TopBar title="Grades" onBack={back} />
+        <div style={screenBox}><ErrorBanner message={err} /><ScaleSetup busy={busy} onChoose={(b) => safeRun(() => gradesApi.setSettings(b))} /></div>
+      </div>
+    );
+  }
+
+  const subject = openId && data.subjects.find((s) => s.id === openId);
+  if (subject) {
+    return <GradeSubjectView subject={subject} settings={settings} folderList={folderList} go={go} back={() => setOpenId(null)} run={safeRun} setErr={setErr} />;
+  }
+
+  const ov = data.overall;
+  const overallPass = ov.percent !== null && ov.percent >= (settings.passing_percent ?? 75);
+  return (
+    <div>
+      <TopBar title="Grades" onBack={back} right={<button aria-label="Grading settings" style={iconBtnStyle} onClick={() => setSettingsOpen(true)}><Pencil size={15} color={T.ink} /></button>} />
+      <div className="orbit-stagger" style={screenBox}>
+        <ErrorBanner message={err} />
+        <div className="orbit-card" style={{ ...rowCardStyle, flexDirection: "column", alignItems: "center", gap: 4, padding: "22px 16px" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>{scale === "percent" ? "Overall average" : "Overall average (weighted by units)"}</div>
+          <div style={{ fontSize: 38, fontWeight: 800, color: ov.grade === null ? T.inkFaint : overallPass ? T.primary : T.danger }}>{formatGrade(scale, ov.grade)}</div>
+          <div style={{ fontSize: 12.5, color: T.inkFaint }}>{scale !== "percent" && ov.percent !== null ? `${fmtPct(ov.percent)} · ` : ""}Scale: {GRADE_SCALES.find((s) => s.key === scale)?.title} · passing {settings.passing_percent}%</div>
+        </div>
+        {data.subjects.length === 0 && <div style={{ textAlign: "center", color: T.inkFaint, fontSize: 13.5, padding: "14px 10px" }}>Add your first subject to start tracking.</div>}
+        <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {data.subjects.map((s) => {
+            const pass = s.percent !== null && s.percent >= (settings.passing_percent ?? 75);
+            return (
+              <div key={s.id} className="orbit-card" onClick={() => setOpenId(s.id)} style={{ ...rowCardStyle, cursor: "pointer", flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14.5, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                    <div style={{ fontSize: 11.5, color: T.inkFaint }}>{s.units} unit{s.units === 1 ? "" : "s"} · {s.entries.length} score{s.entries.length === 1 ? "" : "s"}</div>
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: s.percent === null ? T.inkFaint : pass ? T.primary : T.danger }}>{formatGrade(scale, s.grade)}</div>
+                </div>
+                <div style={{ height: 5, borderRadius: 99, background: T.line, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.max(0, Math.min(100, s.percent || 0))}%`, height: "100%", background: pass ? T.primary : T.danger, transition: "width .3s" }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && name.trim() && safeRun(() => gradesApi.addSubject({ name, units: numOrNull(units) || 1 })).then(() => setName(""))} placeholder="Add a subject…" style={inputStyle} />
+          <input value={units} onChange={(e) => setUnits(e.target.value)} inputMode="decimal" aria-label="Units" title="Units (credit hours)" style={{ ...inputStyle, width: 70 }} />
+          <button aria-label="Add subject" disabled={!name.trim() || busy} style={{ ...primaryBtn, padding: "0 18px" }} onClick={() => safeRun(() => gradesApi.addSubject({ name, units: numOrNull(units) || 1 })).then(() => setName(""))}><Plus size={16} /></button>
+        </div>
+        <div style={{ fontSize: 11.5, color: T.inkFaint }}>Units are your subject's credit weight (e.g. 3). Your grades are private — never shown to friends or groups.</div>
+      </div>
+      {settingsOpen && <GradeSettingsModal settings={settings} onClose={() => setSettingsOpen(false)} onSave={(b) => run(() => gradesApi.setSettings(b))} />}
+    </div>
+  );
+}
+
 const NAV_ITEMS = [
   { key: "home", label: "Home", icon: Home }, { key: "archive", label: "Archive", icon: FolderOpen },
-  { key: "calendar", label: "Calendar", icon: CalendarIcon }, { key: "todo", label: "Tasks", icon: ListTodo },
+  { key: "calendar", label: "Calendar", icon: CalendarIcon }, { key: "todo", label: "Tasks", icon: ListTodo }, { key: "grades", label: "Grades", icon: GraduationCap },
   { key: "groupslist", label: "Groups", icon: Users }, { key: "messages", label: "Messages", icon: MessageCircle }, { key: "friends", label: "Friends", icon: UserCheck }, { key: "insights", label: "Insights", icon: BarChart3 },
   { key: "reminders", label: "Reminders", icon: Bell }, { key: "profile", label: "Profile", icon: User },
 ];
@@ -3858,6 +4198,8 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
           : <CenterSpinner label="Loading group…" />;
       case "messages":
         return <MessagesScreen friends={friends} convos={convos} activeId={activeDmId} go={go} subscribe={subscribeDm} onChanged={loadSocial} isDesktop={isDesktop} onOpenFriends={() => go("friends")} requestCount={socialSummary.incoming_requests} />;
+      case "grades":
+        return <GradesScreen back={() => setScreen("home")} folderList={folderList} go={go} />;
       case "friends":
         return <FriendsScreen back={() => setScreen("messages")} friends={friends} requests={friendRequests} go={go} onChanged={loadSocial} initialTab={socialSummary.incoming_requests > 0 ? "requests" : "friends"} />;
       case "friend":

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 
 import ai_providers
+import grades_api
 import auth
 import avatars
 import google_calendar
@@ -509,6 +510,9 @@ def delete_folder(folder_id: str, db: Session = Depends(get_db), user: models.Us
     # Tasks linked to this folder (or its items) keep existing — they just lose the link.
     db.query(models.Task).filter(models.Task.owner_id == user.id, models.Task.folder_id == folder.id).update(
         {"folder_id": None, "item_id": None}, synchronize_session=False
+    )
+    db.query(models.GradeSubject).filter(models.GradeSubject.owner_id == user.id, models.GradeSubject.folder_id == folder.id).update(
+        {"folder_id": None}, synchronize_session=False
     )
     db.delete(folder)
     db.commit()
@@ -1100,6 +1104,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 app.include_router(social.build_router(limiter))
+app.include_router(grades_api.build_router())
 
 
 @app.websocket("/ws/groups/{group_id}")
@@ -1200,6 +1205,7 @@ def _erase_user_data(db: Session, user: models.User) -> None:
             db.delete(group)
 
     social.erase_social_data(db, user.id)
+    grades_api.erase_grades(db, user.id)
     db.query(models.GroupMembership).filter(models.GroupMembership.user_id == user.id).delete(synchronize_session=False)
     db.query(models.GroupMessage).filter(models.GroupMessage.sender_id == user.id).update(
         {"sender_id": None}, synchronize_session=False
@@ -1341,6 +1347,7 @@ def export_my_data(request: Request, user: models.User = Depends(auth.get_curren
             for m in messages
         ],
         **social.export_social_data(db, user.id),
+        "grades": grades_api.export_grades(db, user),
         "notes": [
             "Archive items contain the title, summary and tags only; uploaded photos are not stored by Orbit.",
             "Direct messages are included only if you sent them; messages other people sent you belong to their accounts.",

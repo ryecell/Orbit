@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import deferred, relationship
 
 from database import Base
@@ -305,3 +305,57 @@ class UserBlock(Base):
     blocker_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     blocked_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------- grades tracker (private to the owner) ----------
+
+class GradeSettings(Base):
+    __tablename__ = "grade_settings"
+
+    user_id = Column(String, ForeignKey("users.id"), primary_key=True)
+    scale = Column(String, nullable=False)  # "1-5" | "5-1" | "gpa4" | "percent"
+    passing_percent = Column(Float, nullable=False, default=75.0)
+    table_json = Column(Text, nullable=True)  # custom conversion table; NULL = the scale's default
+
+
+class GradeSubject(Base):
+    __tablename__ = "grade_subjects"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    units = Column(Float, nullable=False, default=1.0)
+    folder_id = Column(String, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)
+    # A final grade typed in directly (stored as the percent it stands for); overrides the computed one.
+    final_percent = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    categories = relationship("GradeCategory", cascade="all, delete-orphan", back_populates="subject", order_by="GradeCategory.created_at")
+    entries = relationship("GradeEntry", cascade="all, delete-orphan", back_populates="subject", order_by="GradeEntry.created_at")
+
+
+class GradeCategory(Base):
+    __tablename__ = "grade_categories"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    subject_id = Column(String, ForeignKey("grade_subjects.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    weight = Column(Float, nullable=False, default=0.0)  # percent of the subject grade; 0 = unweighted
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    subject = relationship("GradeSubject", back_populates="categories")
+
+
+class GradeEntry(Base):
+    __tablename__ = "grade_entries"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    subject_id = Column(String, ForeignKey("grade_subjects.id", ondelete="CASCADE"), nullable=False, index=True)
+    category_id = Column(String, ForeignKey("grade_categories.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String, nullable=False)
+    score = Column(Float, nullable=False)
+    total = Column(Float, nullable=False)
+    date = Column(String, default="")  # YYYY-MM-DD or ""
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    subject = relationship("GradeSubject", back_populates="entries")
