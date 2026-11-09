@@ -10,7 +10,7 @@ python -m venv venv
 source venv/bin/activate      # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-export ANTHROPIC_API_KEY="sk-ant-..."       # required for /ai/analyze
+export GEMINI_API_KEY="..."                  # free AI tagging (Google AI Studio); see ai_providers.py for other providers
 export ORBIT_SECRET_KEY="something-random"   # see note below
 export ORBIT_ALLOWED_ORIGINS="http://localhost:5173"
 
@@ -142,7 +142,7 @@ that itself.
 | POST   | `/groups/{id}/leave`          | Leave a group                   |
 | GET/POST | `/groups/{id}/messages`     | Chat history (REST) — requires membership |
 | WS     | `/ws/groups/{id}?token=...`   | Live chat over WebSocket — auth + membership required |
-| POST   | `/ai/analyze`                 | Sends an image to Claude server-side, returns title/folder/tags/summary |
+| POST   | `/ai/analyze`                 | Sends an image to the configured AI provider (Gemini free tier by default), returns title/folder/tags/summary |
 
 All routes except `/auth/*`, `/health`, and `/docs` require
 `Authorization: Bearer <token>`.

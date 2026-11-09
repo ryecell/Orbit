@@ -16,6 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
+import ai_providers
 import auth
 import avatars
 import google_calendar
@@ -1299,26 +1300,19 @@ def _purge_on_startup() -> None:
 
 # ============================== AI AUTO-TAGGING ==============================
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-ANTHROPIC_MODEL = "claude-sonnet-4-6"
-
-
 @app.post("/ai/analyze", response_model=schemas.AnalyzeResponse)
 @limiter.limit("15/minute")
 async def analyze_image(request: Request, payload: schemas.AnalyzeRequest, user: models.User = Depends(auth.get_current_user)):
     """
-    Server-side AI tagging: the image never needs to expose your Anthropic API
-    key to the browser. Set ANTHROPIC_API_KEY as an environment variable.
+    Server-side AI tagging (see ai_providers.py for the supported providers —
+    a free tier such as Google's Gemini works). The image never needs to expose
+    an API key to the browser, and per-user/per-day caps protect the free quota.
     """
-    if not ANTHROPIC_API_KEY:
-        raise HTTPException(
-            status_code=500,
-            detail="ANTHROPIC_API_KEY is not set on the server. Export it before starting the app.",
-        )
+    if not ai_providers.provider_name():
+        raise HTTPException(status_code=503, detail="AI tagging isn't set up on this server yet. You can still save items manually.")
 
-    # Cap payload size before it reaches Anthropic — otherwise a huge image
-    # (accidental or malicious) costs you money and ties up a worker for no
-    # reason. Base64 is ~4/3 the size of the raw bytes.
+    # Cap payload size before it goes to the AI provider — a huge image costs
+    # quota and ties up a worker. Base64 is ~4/3 the size of the raw bytes.
     MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
     approx_bytes = len(payload.image_base64) * 3 / 4
     if approx_bytes > MAX_IMAGE_BYTES:
@@ -1326,64 +1320,18 @@ async def analyze_image(request: Request, payload: schemas.AnalyzeRequest, user:
 
     folders = [" ".join(str(f).split())[:40] for f in (payload.candidate_folders or [])][:MAX_FOLDERS_PER_USER]
     folders = [f for f in folders if f] or [d[0] for d in DEFAULT_FOLDERS]
-    prompt = (
-        "You are the AI auto-tagging engine inside a digital archive app called Orbit. "
-        "Look at this image \u2014 it may be handwritten notes, a printed document, a diagram, or a photo \u2014 "
-        "and respond with ONLY raw JSON, no markdown fences, no preamble, in exactly this shape: "
-        '{"title": "short descriptive title, max 6 words", '
-        f'"folder": "best matching folder from this list: {", ".join(folders)}", '
-        '"tags": ["3 to 5 short lowercase keyword tags"], '
-        '"summary": "one sentence, max 22 words, summarizing the content"}'
-    )
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": ANTHROPIC_MODEL,
-                "max_tokens": 500,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": payload.media_type,
-                                    "data": payload.image_base64,
-                                },
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ],
-            },
-        )
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Anthropic API error: {resp.text}")
-
-    data = resp.json()
-    text = "".join(block.get("text", "") for block in data.get("content", []))
-    cleaned = text.replace("```json", "").replace("```", "").strip()
-
+    per_user, total = ai_providers.limits()
+    denied = ai_providers.quota.try_consume(user.id, per_user, total)
+    if denied:
+        raise HTTPException(status_code=429, detail=denied)
     try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail="AI response was not valid JSON")
+        result = await ai_providers.analyze(payload.image_base64, payload.media_type, folders)
+    except ai_providers.AIError as exc:
+        ai_providers.quota.refund(user.id)  # a failed call shouldn't use up the person's daily scans
+        raise HTTPException(status_code=exc.status, detail=str(exc))
 
-    return schemas.AnalyzeResponse(
-        title=parsed.get("title", "Untitled note"),
-        folder=parsed.get("folder", "Personal"),
-        tags=parsed.get("tags", []),
-        summary=parsed.get("summary", ""),
-    )
+    return schemas.AnalyzeResponse(**result)
 
 
 @app.get("/health")

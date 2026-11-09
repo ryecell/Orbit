@@ -629,7 +629,7 @@ You must be at least 13 years old to use Orbit. If you are in the European Econo
 You're responsible for keeping your password secure and for activity under your account. An email address is optional at signup — without one, account recovery (e.g. a forgotten password) may not be possible.
 
 # Your content
-You keep ownership of what you create in Orbit. By uploading content, you grant us a limited license to store, process, and display it back to you — including sending images you upload to our AI provider (Anthropic) to generate suggested titles, tags, and summaries.
+You keep ownership of what you create in Orbit. By uploading content, you grant us a limited license to store, process, and display it back to you — including sending images you upload to our AI provider (Google, via its Gemini API) to generate suggested titles, tags, and summaries.
 
 Don't upload anything that infringes someone else's rights, is illegal or abusive, or contains malware.
 
@@ -664,7 +664,7 @@ This is a summary for in-app display. The full Terms of Service document governs
   },
   privacy: {
     title: "Privacy Policy",
-    body: `Last updated: October 29, 2026
+    body: `Last updated: November 8, 2026
 
 This explains what Orbit collects and how we use it. The data controller for Orbit is the operator of this service, contactable at ryecellz23@gmail.com.
 
@@ -683,7 +683,7 @@ We don't use advertising cookies or third-party tracking scripts.
 To provide the Service, process photos you upload for AI tagging, send account emails (verification, password reset) if you've linked an email, and prevent abuse.
 
 # AI processing
-Photos you upload through the capture feature are sent to Anthropic (Claude's maker) for analysis. Only images you actively upload are sent — nothing happens automatically in the background. We use Anthropic's Commercial Terms, which do not permit training on your data; Anthropic's own privacy terms govern their handling of the images.
+Photos you upload through the capture feature are sent to Google (via its Gemini API) for analysis. Only images you actively upload are sent — nothing happens automatically in the background. We use Google's free tier, under which Google may use submitted content to improve its products and human reviewers may read it, so please don't scan photos containing sensitive personal information (IDs, financial or medical documents, other people's private details). You can always save items manually without using the AI. Google's own privacy terms govern its handling of the images. We limit how many AI scans each person can run per day.
 
 # Subprocessors
 We use the following third-party services to operate Orbit:
@@ -691,7 +691,7 @@ We use the following third-party services to operate Orbit:
 - Neon — PostgreSQL database hosting (all account and content data)
 - Render — application hosting (all data processed by the API)
 - Vercel — frontend static hosting (no user data)
-- Anthropic — AI image analysis (images you actively upload)
+- Google (Gemini API) — AI image analysis (images you actively upload)
 - Resend — transactional email, if configured (your email address and the content of verification/reset emails)
 - Google — Google Calendar, only if you choose to connect it (see "Google Calendar sync" below)
 
