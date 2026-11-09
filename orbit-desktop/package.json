@@ -1,0 +1,31 @@
+{
+  "name": "orbit-desktop",
+  "productName": "Orbit",
+  "version": "1.0.0",
+  "description": "Orbit — your student archive, as a desktop app",
+  "main": "main.js",
+  "author": "Orbit",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "in.indevs.my-orbit.desktop",
+    "productName": "Orbit",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["main.js", "offline.html", "package.json", "build/icon.png"],
+    "win": { "target": ["nsis"], "icon": "build/icon.png" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true },
+    "mac": { "target": ["dmg"], "category": "public.app-category.productivity", "icon": "build/icon.png" },
+    "linux": { "target": ["AppImage"], "category": "Office", "icon": "build/icon.png" }
+  }
+}

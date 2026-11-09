@@ -1,0 +1,46 @@
+# Builds the Orbit desktop installers (Windows .exe, macOS .dmg, Linux .AppImage).
+# Run it by hand: GitHub → Actions → "Desktop app" → Run workflow.
+# Or push a tag like  desktop-v1.0.0  and the installers are attached to a GitHub Release.
+name: Desktop app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["desktop-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: orbit-desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npx electron-builder --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false" # unsigned builds (see README)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbit-desktop-${{ matrix.os }}
+          path: |
+            orbit-desktop/dist/*.exe
+            orbit-desktop/dist/*.dmg
+            orbit-desktop/dist/*.AppImage
+      - if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            orbit-desktop/dist/*.exe
+            orbit-desktop/dist/*.dmg
+            orbit-desktop/dist/*.AppImage
