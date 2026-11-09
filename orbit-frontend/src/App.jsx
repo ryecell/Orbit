@@ -6,7 +6,7 @@ import {
   Wifi, Mic, ListTodo, BarChart3, ChevronDown, AlertCircle,
   Leaf, Paperclip, Lock, LayoutGrid, Layers, LogOut, Mail, KeyRound, Download, Trash2, Copy, Share2,
   BookOpen, FlaskConical, Code, Calculator, Lightbulb, GraduationCap, Globe, Palette, Music, Heart, Briefcase,
-  Pencil, ChevronUp
+  Pencil, ChevronUp, UserPlus, UserMinus, UserCheck, MessageCircle, Ban
 } from "lucide-react";
 import { api } from "./api.js";
 
@@ -664,14 +664,16 @@ This is a summary for in-app display. The full Terms of Service document governs
   },
   privacy: {
     title: "Privacy Policy",
-    body: `Last updated: October 28, 2026
+    body: `Last updated: October 29, 2026
 
 This explains what Orbit collects and how we use it. The data controller for Orbit is the operator of this service, contactable at ryecellz23@gmail.com.
 
 # What we collect
-Account info: username (required), password (hashed, never stored in plain text), and full name, email and profile picture (all optional). A profile picture is resized to a small square copy before it is stored; the original you picked is not kept. It is visible to you and to people who share a group with you, and it is deleted when you remove it or delete your account. Your date of birth is checked at signup only to verify you meet the minimum age, and is not stored.
+Account info: username (required), password (hashed, never stored in plain text), and full name, email and profile picture (all optional). A profile picture is resized to a small square copy before it is stored; the original you picked is not kept. It is visible to you, your friends and people who share a group with you (never to someone you have blocked), and it is deleted when you remove it or delete your account. Your date of birth is checked at signup only to verify you meet the minimum age, and is not stored.
 
-Your content: folders, archive items (including photos you upload), tasks, reminders, calendar events, study session logs, and group messages.
+Your content: folders, archive items (including photos you upload), tasks, reminders, calendar events, study session logs, group messages, and — if you use the friends feature — your friend list, friend requests, people you have blocked, and direct messages.
+
+Direct messages can only be sent between accepted friends. They are stored on our servers (not end-to-end encrypted), are visible only to the two people in the conversation, and are not read by us except where needed to investigate abuse or comply with the law.
 
 Technical data: IP address (for rate limiting, not tracking), basic server logs, and a single auth token in your browser's local storage to keep you signed in.
 
@@ -697,7 +699,7 @@ We use the following third-party services to operate Orbit:
 If you connect Google Calendar, Orbit asks Google for permission to add, change and delete events on your Google Calendar, and nothing else. When you add, edit or delete an event in Orbit, its title, description and times are sent to your own Google Calendar. Orbit does not read your other Google events. We store your Google email address and an encrypted access token so we can keep syncing; we never see your Google password. Orbit's use of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements. You can disconnect any time in Profile → Connections, which revokes Orbit's access; events already copied to Google stay in your Google Calendar, and you can also remove Orbit's access at myaccount.google.com/permissions. Deleting your Orbit account disconnects Google automatically.
 
 # Data retention
-Your account and content are retained while your account is active. When you delete your account, we immediately revoke all sessions, erase your content (folders, notes, tasks, reminders, events, study history) and anonymize your identifiers (username, email, name), then hard-delete the underlying record after a 30-day grace period, after which no personal data remains. Group messages you've posted remain visible to other group members, attributed to your display name — they are part of the group's shared history and are not removed by account deletion.
+Your account and content are retained while your account is active. When you delete your account, we immediately revoke all sessions, erase your content (folders, notes, tasks, reminders, events, study history) and anonymize your identifiers (username, email, name), delete your friendships, blocks and all direct messages you sent or received, then hard-delete the underlying record after a 30-day grace period, after which no personal data remains. Group messages you've posted remain visible to other group members, attributed to your display name — they are part of the group's shared history and are not removed by account deletion.
 
 # Security
 Passwords are hashed (bcrypt), sessions use signed tokens with expiration, and we rate-limit sensitive endpoints. No method is 100% secure.
@@ -2038,7 +2040,7 @@ function GroupsListScreen({ back, groups, go, onCreate, onJoin, activeId }) {
   );
 }
 
-function GroupScreen({ back, user, group, embedded = false }) {
+function GroupScreen({ back, user, group, embedded = false , onOpenProfile}) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [connected, setConnected] = useState(false);
@@ -2094,6 +2096,7 @@ function GroupScreen({ back, user, group, embedded = false }) {
           >{linkCopied ? "Link copied ✓" : "Copy invite link"}</span>
         </div>
       )}
+      {showCode && <GroupMembersPanel groupId={group.id} me={user} onOpenProfile={onOpenProfile} />}
       {authFailed && <div style={{ margin: "0 20px 10px" }}><ErrorBanner message="Your session couldn't be verified for chat. Try signing out and back in." /></div>}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 20px", display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map((m) => {
@@ -2102,7 +2105,7 @@ function GroupScreen({ back, user, group, embedded = false }) {
           const sentAt = m.created_at ? new Date(m.created_at.endsWith("Z") || /[+-]\d\d:\d\d$/.test(m.created_at) ? m.created_at : `${m.created_at}Z`) : null;
           return (
             <div key={m.id} className="orbit-msg" style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: embedded ? "70%" : "78%", display: "flex", gap: 8, alignItems: "flex-end" }}>
-              {!mine && <Avatar userId={m.sender_id} name={m.sender_name} size={28} />}
+              {!mine && <span onClick={() => m.sender_id && onOpenProfile && onOpenProfile(m.sender_id)} style={{ cursor: m.sender_id && onOpenProfile ? "pointer" : "default", display: "inline-flex" }}><Avatar userId={m.sender_id} name={m.sender_name} size={28} /></span>}
               <div style={{ minWidth: 0 }}>
                 {!mine && <div style={{ fontSize: 11, fontWeight: 700, color: T.primary, marginBottom: 2 }}>{m.sender_name}</div>}
                 <div style={{ background: mine ? T.primary : T.panel, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: 14, padding: "10px 13px", fontSize: 13.5, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{m.text}</div>
@@ -2812,15 +2815,521 @@ function ProfileScreen({ back, user, onLogout, onUserUpdate, google, onConnectGo
 
 /* --------------------------------- NAV SHELL ----------------------------------- */
 
+// ---- Friends & direct messages -------------------------------------------------
+const jsonHeaders = { "Content-Type": "application/json" };
+const socialApi = {
+  lookup: (username) => accountRequest(`/users/lookup?username=${encodeURIComponent(username)}`).then((r) => r.json()),
+  friends: () => accountRequest("/friends").then((r) => r.json()),
+  requests: () => accountRequest("/friends/requests").then((r) => r.json()),
+  sendRequest: (body) => accountRequest("/friends/requests", { method: "POST", headers: jsonHeaders, body: JSON.stringify(body) }).then((r) => r.json()),
+  accept: (id) => accountRequest(`/friends/requests/${id}/accept`, { method: "POST" }).then((r) => r.json()),
+  cancel: (id) => accountRequest(`/friends/requests/${id}`, { method: "DELETE" }),
+  unfriend: (userId) => accountRequest(`/friends/${userId}`, { method: "DELETE" }),
+  blocks: () => accountRequest("/blocks").then((r) => r.json()),
+  block: (userId) => accountRequest(`/blocks/${userId}`, { method: "POST" }),
+  unblock: (userId) => accountRequest(`/blocks/${userId}`, { method: "DELETE" }),
+  profile: (userId) => accountRequest(`/users/${userId}/profile`).then((r) => r.json()),
+  members: (groupId) => accountRequest(`/groups/${groupId}/members`).then((r) => r.json()),
+  conversations: () => accountRequest("/dm/conversations").then((r) => r.json()),
+  history: (userId, before) => accountRequest(`/dm/${userId}/messages${before ? `?before=${encodeURIComponent(before)}` : ""}`).then((r) => r.json()),
+  send: (userId, text) => accountRequest(`/dm/${userId}/messages`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ text }) }).then((r) => r.json()),
+  markRead: (userId) => accountRequest(`/dm/${userId}/read`, { method: "POST" }),
+  summary: () => accountRequest("/social/summary").then((r) => r.json()),
+  socketURL: () => `${String(api.base).replace(/\/$/, "").replace(/^http/, "ws")}/ws/me?token=${encodeURIComponent(api.getToken() || "")}`,
+};
+
+function shortStamp(iso) {
+  const d = parseServerDate(iso);
+  if (!d || isNaN(d)) return "";
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const days = (now - d) / 86400000;
+  if (days < 6) return d.toLocaleDateString(undefined, { weekday: "short" });
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function CountBadge({ n, style }) {
+  if (!n) return null;
+  return (
+    <span style={{ minWidth: 18, height: 18, padding: "0 5px", boxSizing: "border-box", borderRadius: 999, background: T.coral, color: "#fff", fontSize: 10.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", ...style }}>
+      {n > 99 ? "99+" : n}
+    </span>
+  );
+}
+
+const smallBtn = { border: `1px solid ${T.line}`, background: T.panel, color: T.ink, borderRadius: 10, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 };
+const smallPrimary = { ...smallBtn, background: T.primary, color: "#fff", border: "none" };
+
+function PersonRow({ person, onOpen, right }) {
+  return (
+    <div className="orbit-lift" style={{ ...rowCardStyle, cursor: onOpen ? "pointer" : "default" }} onClick={onOpen}>
+      <Avatar userId={person.id} name={person.name} version={person.avatar_version || 0} hasAvatar={person.has_avatar} size={42} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{person.name}</div>
+        <div style={{ fontSize: 12, color: T.inkFaint }}>@{person.username}</div>
+      </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 6, alignItems: "center" }}>{right}</div>
+    </div>
+  );
+}
+
+function FriendsScreen({ back, friends, requests, go, onChanged, initialTab = "friends" }) {
+  const [tab, setTab] = useState(initialTab);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState("");
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [blocks, setBlocks] = useState(null);
+  const incoming = requests.incoming || [];
+  const outgoing = requests.outgoing || [];
+
+  useEffect(() => {
+    if (tab !== "friends") return;
+    let off = false;
+    socialApi.blocks().then((b) => !off && setBlocks(b)).catch(() => {});
+    return () => { off = true; };
+  }, [tab]);
+
+  async function run(key, fn) {
+    setErr(""); setBusy(key);
+    try { await fn(); await onChanged(); } catch (e) { setErr(e.message || "Something went wrong."); }
+    finally { setBusy(""); }
+  }
+
+  async function search() {
+    const u = query.trim().replace(/^@/, "");
+    if (!u) return;
+    setErr(""); setFound(null); setSearching(true);
+    try { setFound(await socialApi.lookup(u)); }
+    catch (e) { setErr(/not found/i.test(e.message || "") ? `No one with the username @${u.toLowerCase()}.` : e.message); }
+    finally { setSearching(false); }
+  }
+
+  async function addFound() {
+    await run("add", async () => {
+      const r = await socialApi.sendRequest({ user_id: found.id });
+      setFound({ ...found, relationship: r.status === "friends" ? "friends" : "pending_out" });
+    });
+  }
+
+  const tabBtn = (key, label, badge) => (
+    <button key={key} onClick={() => { setTab(key); setErr(""); }} style={{ flex: 1, border: "none", cursor: "pointer", padding: "10px 8px", borderRadius: 11, fontSize: 13, fontWeight: 700, background: tab === key ? T.panel : "transparent", color: tab === key ? T.primary : T.inkSoft, boxShadow: tab === key ? T.shadow : "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+      {label}<CountBadge n={badge} />
+    </button>
+  );
+
+  return (
+    <div>
+      <TopBar title="Friends" onBack={back} />
+      <div style={screenBox}>
+        <div style={{ display: "flex", gap: 4, background: T.primarySoft, borderRadius: 14, padding: 4 }}>
+          {tabBtn("friends", `Friends${friends.length ? ` · ${friends.length}` : ""}`)}
+          {tabBtn("requests", "Requests", incoming.length)}
+          {tabBtn("add", "Add")}
+        </div>
+        <ErrorBanner message={err} />
+
+        {tab === "friends" && (
+          <>
+            {friends.length === 0 && (
+              <div style={{ textAlign: "center", color: T.inkFaint, padding: "34px 10px", fontSize: 13.5 }}>
+                <Users size={30} color={T.inkFaint} />
+                <div style={{ marginTop: 8, fontWeight: 700, color: T.inkSoft }}>No friends yet</div>
+                <div style={{ marginTop: 4 }}>Add someone by username, or open a group and tap Add friend next to a member.</div>
+                <button onClick={() => setTab("add")} style={{ ...smallPrimary, marginTop: 14 }}><UserPlus size={14} /> Add a friend</button>
+              </div>
+            )}
+            <div className="orbit-grid" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {friends.map((f) => (
+                <PersonRow key={f.id} person={f} onOpen={() => go("friend", f.id)}
+                  right={<button aria-label={`Message ${f.name}`} onClick={() => go("messages", f.id)} style={iconBtnStyle}><MessageCircle size={16} color={T.primary} /></button>} />
+              ))}
+            </div>
+            {blocks && blocks.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft, marginBottom: 8 }}>Blocked</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {blocks.map((b) => (
+                    <PersonRow key={b.id} person={b}
+                      right={<button disabled={busy === `ub${b.id}`} style={smallBtn} onClick={() => run(`ub${b.id}`, async () => { await socialApi.unblock(b.id); setBlocks((p) => p.filter((x) => x.id !== b.id)); })}>Unblock</button>} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === "requests" && (
+          <>
+            {incoming.length === 0 && outgoing.length === 0 && (
+              <div style={{ textAlign: "center", color: T.inkFaint, padding: "34px 10px", fontSize: 13.5 }}>No pending requests.</div>
+            )}
+            {incoming.length > 0 && <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>Wants to be your friend</div>}
+            {incoming.map((r) => (
+              <PersonRow key={r.id} person={r.user} onOpen={() => go("friend", r.user.id)}
+                right={<>
+                  <button disabled={!!busy} style={smallPrimary} onClick={() => run(`a${r.id}`, () => socialApi.accept(r.id))}>Accept</button>
+                  <button disabled={!!busy} style={smallBtn} onClick={() => run(`d${r.id}`, () => socialApi.cancel(r.id))}>Decline</button>
+                </>} />
+            ))}
+            {outgoing.length > 0 && <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft, marginTop: 6 }}>Sent by you</div>}
+            {outgoing.map((r) => (
+              <PersonRow key={r.id} person={r.user} onOpen={() => go("friend", r.user.id)}
+                right={<button disabled={!!busy} style={smallBtn} onClick={() => run(`c${r.id}`, () => socialApi.cancel(r.id))}>Cancel</button>} />
+            ))}
+          </>
+        )}
+
+        {tab === "add" && (
+          <>
+            <div style={{ fontSize: 13, color: T.inkSoft }}>Type the exact username of the person you want to add.</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} placeholder="@username" autoCapitalize="none" autoCorrect="off" style={inputStyle} />
+              <button onClick={search} disabled={searching || !query.trim()} style={{ ...primaryBtn, padding: "0 18px", opacity: searching || !query.trim() ? 0.6 : 1 }}>
+                {searching ? <OrbitSpinner size={14} color="#fff" /> : <Search size={16} />}
+              </button>
+            </div>
+            {found && (
+              <PersonRow person={found} onOpen={() => go("friend", found.id)}
+                right={
+                  found.relationship === "friends" ? <span style={{ fontSize: 12.5, fontWeight: 700, color: T.primary }}>Friends ✓</span>
+                  : found.relationship === "pending_out" ? <span style={{ fontSize: 12.5, fontWeight: 700, color: T.inkFaint }}>Request sent</span>
+                  : found.relationship === "blocked" ? <span style={{ fontSize: 12.5, color: T.inkFaint }}>Blocked</span>
+                  : <button disabled={busy === "add"} style={smallPrimary} onClick={addFound}><UserPlus size={14} /> {found.relationship === "pending_in" ? "Accept" : "Add"}</button>
+                } />
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FriendProfileScreen({ back, userId, me, go, onChanged }) {
+  const [p, setP] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    try { setP(await socialApi.profile(userId)); setErr(""); }
+    catch (e) { setErr(/not found/i.test(e.message || "") ? "This profile isn't available." : e.message); setP(null); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { setLoading(true); load(); /* eslint-disable-next-line */ }, [userId]);
+
+  async function act(fn, { reload = true, leave = false } = {}) {
+    setBusy(true); setErr("");
+    try { await fn(); await onChanged(); if (leave) back(); else if (reload) await load(); }
+    catch (e) { setErr(e.message || "Something went wrong."); }
+    finally { setBusy(false); }
+  }
+
+  if (loading) return <div><TopBar title="Profile" onBack={back} /><CenterSpinner label="Loading profile…" /></div>;
+  if (!p) return <div><TopBar title="Profile" onBack={back} /><div style={screenBox}><ErrorBanner message={err || "This profile isn't available."} /></div></div>;
+
+  const rel = p.relationship;
+  const fmt = (iso) => { const d = parseServerDate(iso); return d && !isNaN(d) ? d.toLocaleDateString(undefined, { month: "long", year: "numeric" }) : ""; };
+  const stat = (label, value) => (
+    <div style={{ flex: 1, textAlign: "center", padding: "12px 6px" }}>
+      <div style={{ fontSize: 18, fontWeight: 800, color: T.ink }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: T.inkFaint, fontWeight: 600 }}>{label}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <TopBar title="Profile" onBack={back} />
+      <div style={screenBox}>
+        <div style={{ ...rowCardStyle, flexDirection: "column", gap: 6, padding: "26px 16px 18px", textAlign: "center" }}>
+          <Avatar userId={p.id} name={p.name} version={p.avatar_version || 0} hasAvatar={p.has_avatar} size={96} />
+          <div style={{ fontSize: 20, fontWeight: 800, color: T.ink, marginTop: 8, wordBreak: "break-word" }}>{p.name}</div>
+          <div style={{ fontSize: 13, color: T.inkFaint }}>@{p.username}</div>
+          {rel === "friends" && p.friends_since && <div style={{ fontSize: 12, color: T.primary, fontWeight: 700 }}>Friends since {fmt(p.friends_since)}</div>}
+          {rel === "pending_out" && <div style={{ fontSize: 12, color: T.inkFaint, fontWeight: 700 }}>Friend request sent</div>}
+          {rel === "pending_in" && <div style={{ fontSize: 12, color: T.accent, fontWeight: 700 }}>Wants to be your friend</div>}
+          {rel === "blocked" && <div style={{ fontSize: 12, color: T.danger, fontWeight: 700 }}>You blocked this person</div>}
+          {p.joined_at && <div style={{ fontSize: 11.5, color: T.inkFaint }}>On Orbit since {fmt(p.joined_at)}</div>}
+        </div>
+
+        <ErrorBanner message={err} />
+
+        {rel !== "self" && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {rel === "friends" && <button disabled={busy} style={{ ...primaryBtn, flex: 1 }} onClick={() => go("messages", p.id)}><MessageCircle size={16} /> Message</button>}
+            {rel === "none" && <button disabled={busy} style={{ ...primaryBtn, flex: 1 }} onClick={() => act(() => socialApi.sendRequest({ user_id: p.id }))}><UserPlus size={16} /> Add friend</button>}
+            {rel === "pending_out" && p.request_id && <button disabled={busy} style={{ ...secondaryBtn, flex: 1 }} onClick={() => act(() => socialApi.cancel(p.request_id))}>Cancel request</button>}
+            {rel === "pending_in" && p.request_id && <>
+              <button disabled={busy} style={{ ...primaryBtn, flex: 1 }} onClick={() => act(() => socialApi.accept(p.request_id))}><Check size={16} /> Accept</button>
+              <button disabled={busy} style={{ ...secondaryBtn, flex: 1 }} onClick={() => act(() => socialApi.cancel(p.request_id))}>Decline</button>
+            </>}
+            {rel === "blocked" && <button disabled={busy} style={{ ...secondaryBtn, flex: 1 }} onClick={() => act(() => socialApi.unblock(p.id))}>Unblock</button>}
+          </div>
+        )}
+
+        {rel !== "self" && rel !== "blocked" && (
+          <div style={{ ...rowCardStyle, padding: 0 }}>
+            {stat("Mutual friends", p.mutual_friends)}
+            <div style={{ width: 1, alignSelf: "stretch", background: T.line }} />
+            {stat("Shared groups", p.mutual_groups.length)}
+          </div>
+        )}
+
+        {p.mutual_groups.length > 0 && (
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft, marginBottom: 8 }}>Groups you're both in</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {p.mutual_groups.map((g) => (
+                <span key={g.id} onClick={() => go("group", g.id)} style={{ background: T.primarySoft, color: T.primary, fontWeight: 700, fontSize: 12.5, borderRadius: 999, padding: "6px 12px", cursor: "pointer" }}>{g.name}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {rel !== "self" && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+            {rel === "friends" && (
+              <button disabled={busy} style={{ ...smallBtn, color: T.danger }} onClick={() => { if (window.confirm(`Remove ${p.name} from your friends? You won't be able to message each other until you're friends again.`)) act(() => socialApi.unfriend(p.id)); }}>
+                <UserMinus size={14} /> Unfriend
+              </button>
+            )}
+            {rel !== "blocked" && (
+              <button disabled={busy} style={{ ...smallBtn, color: T.danger }} onClick={() => { if (window.confirm(`Block ${p.name}? They'll be removed from your friends and can't message you or send requests. You can unblock them any time from your Friends list.`)) act(() => socialApi.block(p.id)); }}>
+                <Ban size={14} /> Block
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DMThread({ friend, embedded, back, onOpenProfile, subscribe, onChanged }) {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState("");
+  const scrollRef = useRef(null);
+  const restoreRef = useRef(null); // scrollHeight before older messages were prepended
+
+  const addMessage = (m) => setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+
+  useEffect(() => {
+    let off = false;
+    setMessages([]); setLoading(true); setErr(""); setDraft("");
+    socialApi.history(friend.id)
+      .then(async (r) => {
+        if (off) return;
+        setMessages(r.messages); setHasMore(r.has_more);
+        try { await socialApi.markRead(friend.id); onChanged(); } catch { /* not critical */ }
+      })
+      .catch((e) => !off && setErr(e.message || "Couldn't load this conversation."))
+      .finally(() => !off && setLoading(false));
+    const unsub = subscribe((msg) => {
+      if (msg.sender_id !== friend.id) return;
+      addMessage(msg);
+      socialApi.markRead(friend.id).then(onChanged).catch(() => {});
+    });
+    return () => { off = true; unsub(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [friend.id]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (restoreRef.current != null) { el.scrollTop = el.scrollHeight - restoreRef.current; restoreRef.current = null; }
+    else el.scrollTo(0, el.scrollHeight);
+  }, [messages]);
+
+  async function loadOlder() {
+    if (!messages.length || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const r = await socialApi.history(friend.id, messages[0].created_at);
+      restoreRef.current = scrollRef.current ? scrollRef.current.scrollHeight : 0;
+      setMessages((prev) => [...r.messages.filter((m) => !prev.some((x) => x.id === m.id)), ...prev]);
+      setHasMore(r.has_more);
+    } catch (e) { setErr(e.message); }
+    finally { setLoadingMore(false); }
+  }
+
+  async function send() {
+    const text = draft.trim();
+    if (!text || sending) return;
+    setSending(true); setErr("");
+    try {
+      const m = await socialApi.send(friend.id, text);
+      addMessage(m); setDraft(""); onChanged();
+    } catch (e) { setErr(e.message || "Couldn't send that message."); }
+    finally { setSending(false); }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: embedded ? "auto" : "100%", flex: embedded ? 1 : undefined, minHeight: 0 }}>
+      <TopBar title={friend.name} onBack={embedded ? undefined : back} right={
+        <button aria-label="View profile" onClick={() => onOpenProfile(friend.id)} style={iconBtnStyle}><User size={15} color={T.ink} /></button>
+      } />
+      {err && <div style={{ margin: "0 20px 10px" }}><ErrorBanner message={err} /></div>}
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 20px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {loading && <CenterSpinner label="Loading messages…" />}
+        {!loading && hasMore && (
+          <button onClick={loadOlder} disabled={loadingMore} style={{ ...smallBtn, alignSelf: "center" }}>{loadingMore ? "Loading…" : "Load earlier messages"}</button>
+        )}
+        {!loading && messages.length === 0 && !err && (
+          <div style={{ margin: "auto", textAlign: "center", color: T.inkFaint, fontSize: 13.5, padding: 20 }}>
+            <Avatar userId={friend.id} name={friend.name} version={friend.avatar_version || 0} hasAvatar={friend.has_avatar} size={56} />
+            <div style={{ marginTop: 8 }}>Say hi to {friend.name}.</div>
+          </div>
+        )}
+        {messages.map((m) => {
+          const mine = m.sender_id !== friend.id;
+          const t = parseServerDate(m.created_at);
+          return (
+            <div key={m.id} className="orbit-msg" style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: embedded ? "70%" : "80%" }}>
+              <div style={{ background: mine ? T.primary : T.panel, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: 14, padding: "10px 13px", fontSize: 13.5, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{m.text}</div>
+              {t && !isNaN(t) && <div style={{ fontSize: 10.5, color: T.inkFaint, marginTop: 3, textAlign: mine ? "right" : "left" }}>{t.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}{mine && m.read_at ? " · Seen" : ""}</div>}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 8, padding: embedded ? "12px 20px 16px" : "12px 20px 90px", alignItems: "center" }}>
+        <input value={draft} maxLength={2000} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder={`Message ${friend.name}…`} style={inputStyle} />
+        <button onClick={send} disabled={sending || !draft.trim()} aria-label="Send" style={{ ...iconBtnStyle, background: T.primary, border: "none", opacity: sending || !draft.trim() ? 0.6 : 1 }}>
+          {sending ? <OrbitSpinner size={14} color="#fff" /> : <Send size={15} color="#fff" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MessagesScreen({ friends, convos, activeId, go, subscribe, onChanged, isDesktop, onOpenFriends, requestCount }) {
+  const byId = Object.fromEntries(friends.map((f) => [f.id, f]));
+  convos.forEach((c) => { byId[c.user.id] = byId[c.user.id] || c.user; });
+  const chatted = new Set(convos.map((c) => c.user.id));
+  const others = friends.filter((f) => !chatted.has(f.id));
+  const active = activeId ? byId[activeId] : null;
+  const activeIsFriend = activeId && friends.some((f) => f.id === activeId);
+
+  const list = (
+    <div>
+      <TopBar title="Messages" right={
+        <button onClick={onOpenFriends} style={{ ...iconBtnStyle, position: "relative" }} aria-label="Friends">
+          <Users size={16} color={T.ink} />
+          {requestCount > 0 && <CountBadge n={requestCount} style={{ position: "absolute", top: -6, right: -6 }} />}
+        </button>
+      } />
+      <div style={screenBox}>
+        {convos.length === 0 && friends.length === 0 && (
+          <div style={{ textAlign: "center", color: T.inkFaint, padding: "34px 10px", fontSize: 13.5 }}>
+            <MessageCircle size={30} color={T.inkFaint} />
+            <div style={{ marginTop: 8, fontWeight: 700, color: T.inkSoft }}>No conversations yet</div>
+            <div style={{ marginTop: 4 }}>Add a friend to start messaging.</div>
+            <button onClick={onOpenFriends} style={{ ...smallPrimary, marginTop: 14 }}><UserPlus size={14} /> Find friends</button>
+          </div>
+        )}
+        {convos.map((c) => (
+          <div key={c.user.id} className="orbit-lift" onClick={() => go("messages", c.user.id)}
+            style={{ ...rowCardStyle, cursor: "pointer", borderColor: activeId === c.user.id ? T.primary : T.line }}>
+            <Avatar userId={c.user.id} name={c.user.name} version={c.user.avatar_version || 0} hasAvatar={c.user.has_avatar} size={42} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.user.name}</span>
+                <span style={{ fontSize: 11, color: T.inkFaint, flexShrink: 0 }}>{shortStamp(c.last_message.created_at)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 12.5, color: c.unread ? T.ink : T.inkFaint, fontWeight: c.unread ? 700 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {c.last_message.sender_id === c.user.id ? "" : "You: "}{c.last_message.text}
+                </span>
+                <CountBadge n={c.unread} />
+              </div>
+            </div>
+          </div>
+        ))}
+        {others.length > 0 && <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft, marginTop: 6 }}>Start a chat</div>}
+        {others.map((f) => <PersonRow key={f.id} person={f} onOpen={() => go("messages", f.id)} />)}
+      </div>
+    </div>
+  );
+
+  const thread = active && activeIsFriend ? (
+    <DMThread key={active.id} friend={active} embedded={isDesktop} back={() => go("messages", null)} onOpenProfile={(id) => go("friend", id)} subscribe={subscribe} onChanged={onChanged} />
+  ) : null;
+
+  if (!isDesktop) return thread || list;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 360px) 1fr", gap: 20, height: "100vh", boxSizing: "border-box", padding: "12px 0 20px" }}>
+      <div style={{ overflowY: "auto", minHeight: 0 }}>{list}</div>
+      <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 18, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+        {thread || (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: T.inkFaint, textAlign: "center", padding: 24 }}>
+            <MessageCircle size={34} color={T.inkFaint} />
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.inkSoft }}>{activeId ? "This conversation isn't available" : "Pick a conversation"}</div>
+            <div style={{ fontSize: 13 }}>Messages are private between you and your friends.</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Member list shown from a group chat's header: tap a person to see their profile or add them.
+function GroupMembersPanel({ groupId, me, onOpenProfile }) {
+  const [members, setMembers] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState("");
+  useEffect(() => {
+    let off = false;
+    setMembers(null);
+    socialApi.members(groupId).then((m) => !off && setMembers(m)).catch((e) => !off && setErr(e.message));
+    return () => { off = true; };
+  }, [groupId]);
+
+  async function add(m) {
+    setBusy(m.id); setErr("");
+    try {
+      const r = await socialApi.sendRequest({ user_id: m.id });
+      setMembers((prev) => prev.map((x) => (x.id === m.id ? { ...x, relationship: r.status === "friends" ? "friends" : "pending_out" } : x)));
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(""); }
+  }
+
+  return (
+    <div style={{ margin: "0 20px 10px", background: T.panel, border: `1px solid ${T.line}`, borderRadius: 12, padding: "6px 10px", maxHeight: 220, overflowY: "auto" }}>
+      {!members && !err && <div style={{ padding: 8 }}><OrbitSpinner size={14} /></div>}
+      {err && <ErrorBanner message={err} />}
+      {members && members.map((m) => (
+        <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 2px" }}>
+          <span onClick={() => m.id !== me.id && onOpenProfile && onOpenProfile(m.id)} style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, cursor: m.id !== me.id ? "pointer" : "default" }}>
+            <Avatar userId={m.id} name={m.name} version={m.avatar_version || 0} hasAvatar={m.has_avatar} size={30} />
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}{m.id === me.id ? " (you)" : ""}</span>
+              <span style={{ display: "block", fontSize: 11.5, color: T.inkFaint }}>@{m.username}</span>
+            </span>
+          </span>
+          {m.relationship === "none" && <button disabled={busy === m.id} style={smallPrimary} onClick={() => add(m)}><UserPlus size={13} /> Add</button>}
+          {m.relationship === "pending_out" && <span style={{ fontSize: 11.5, color: T.inkFaint, fontWeight: 700 }}>Requested</span>}
+          {m.relationship === "pending_in" && <button style={smallPrimary} onClick={() => onOpenProfile(m.id)}>Respond</button>}
+          {m.relationship === "friends" && <span style={{ fontSize: 11.5, color: T.primary, fontWeight: 700 }}>Friends ✓</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const NAV_ITEMS = [
   { key: "home", label: "Home", icon: Home }, { key: "archive", label: "Archive", icon: FolderOpen },
   { key: "calendar", label: "Calendar", icon: CalendarIcon }, { key: "todo", label: "Tasks", icon: ListTodo },
-  { key: "groupslist", label: "Groups", icon: Users }, { key: "insights", label: "Insights", icon: BarChart3 },
+  { key: "groupslist", label: "Groups", icon: Users }, { key: "messages", label: "Messages", icon: MessageCircle }, { key: "friends", label: "Friends", icon: UserCheck }, { key: "insights", label: "Insights", icon: BarChart3 },
   { key: "reminders", label: "Reminders", icon: Bell }, { key: "profile", label: "Profile", icon: User },
 ];
 const MOBILE_NAV = [
   { key: "home", icon: Home, label: "Home" }, { key: "archive", icon: FolderOpen, label: "Archive" },
-  { key: "capture", icon: Plus, label: "" }, { key: "groupslist", icon: Users, label: "Groups" },
+  { key: "capture", icon: Plus, label: "" }, { key: "groupslist", icon: Users, label: "Groups" }, { key: "messages", icon: MessageCircle, label: "Chats" },
   { key: "profile", icon: User, label: "Profile" },
 ];
 
@@ -2834,7 +3343,7 @@ function GroupsWorkspace({ groups, activeGroup, user, go, onCreate, onJoin }) {
       </div>
       <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 18, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
         {current ? (
-          <GroupScreen key={current.id} embedded user={user} group={current} />
+          <GroupScreen key={current.id} embedded user={user} group={current} onOpenProfile={(id) => go("friend", id)} />
         ) : (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: T.inkFaint, textAlign: "center", padding: 24 }}>
             <Users size={34} color={T.inkFaint} />
@@ -2865,6 +3374,51 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   const [google, setGoogle] = useState(null); // null until loaded; {configured, connected, needs_reauth, email}
   const [googleNotice, setGoogleNotice] = useState(null); // {kind: "ok" | "error", text}
   const joinTriedRef = useRef(false);
+
+  // ---- friends & direct messages ----
+  const [friends, setFriends] = useState([]);
+  const [friendRequests, setFriendRequests] = useState({ incoming: [], outgoing: [] });
+  const [convos, setConvos] = useState([]);
+  const [socialSummary, setSocialSummary] = useState({ unread_dms: 0, incoming_requests: 0 });
+  const [activeDmId, setActiveDmId] = useState(null);
+  const [profileId, setProfileId] = useState(null);
+  const profileFromRef = useRef("friends");
+  const dmListeners = useRef(new Set());
+
+  async function loadSocial() {
+    try {
+      const [f, r, c, s] = await Promise.all([socialApi.friends(), socialApi.requests(), socialApi.conversations(), socialApi.summary()]);
+      setFriends(f); setFriendRequests(r); setConvos(c); setSocialSummary(s);
+    } catch { /* social features are optional — stay quiet, retry on the next push/poll */ }
+  }
+  const subscribeDm = (cb) => { dmListeners.current.add(cb); return () => dmListeners.current.delete(cb); };
+
+  // Live updates: one personal socket, reconnecting with backoff; a slow poll as a safety net.
+  useEffect(() => {
+    let ws = null, retry = null, ping = null, closed = false, tries = 0;
+    const connect = () => {
+      try { ws = new WebSocket(socialApi.socketURL()); } catch { return; }
+      ws.onopen = () => {
+        tries = 0;
+        ping = setInterval(() => { if (ws && ws.readyState === 1) ws.send('{"type":"ping"}'); }, 25000);
+        loadSocial();
+      };
+      ws.onmessage = (evt) => {
+        let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+        if (msg.type === "dm") dmListeners.current.forEach((cb) => cb(msg.message, msg.from));
+        if (msg.type !== "pong") loadSocial();
+      };
+      ws.onclose = (evt) => {
+        clearInterval(ping);
+        if (closed || evt.code === 4401) return;
+        retry = setTimeout(connect, Math.min(30000, 1000 * 2 ** tries++));
+      };
+    };
+    connect();
+    loadSocial();
+    const poll = setInterval(() => { if (document.visibilityState === "visible") loadSocial(); }, 45000);
+    return () => { closed = true; clearTimeout(retry); clearInterval(ping); clearInterval(poll); if (ws) ws.close(); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2899,6 +3453,8 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   function go(target, param) {
     if (target === "folder") setActiveFolder(param);
     if (target === "group") setActiveGroupId(param);
+    if (target === "messages") setActiveDmId(param || null);
+    if (target === "friend") { setProfileId(param); if (screen !== "friend") profileFromRef.current = screen === "group" ? "group" : screen; }
     setScreen(target);
   }
 
@@ -3129,8 +3685,14 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
       case "group":
         if (isDesktop) return <GroupsWorkspace groups={groups} activeGroup={activeGroup} user={user} go={go} onCreate={createGroup} onJoin={joinGroup} />;
         return activeGroup
-          ? <GroupScreen back={() => setScreen("groupslist")} user={user} group={activeGroup} />
+          ? <GroupScreen back={() => setScreen("groupslist")} user={user} group={activeGroup} onOpenProfile={(id) => go("friend", id)} />
           : <CenterSpinner label="Loading group…" />;
+      case "messages":
+        return <MessagesScreen friends={friends} convos={convos} activeId={activeDmId} go={go} subscribe={subscribeDm} onChanged={loadSocial} isDesktop={isDesktop} onOpenFriends={() => go("friends")} requestCount={socialSummary.incoming_requests} />;
+      case "friends":
+        return <FriendsScreen back={() => setScreen("messages")} friends={friends} requests={friendRequests} go={go} onChanged={loadSocial} initialTab={socialSummary.incoming_requests > 0 ? "requests" : "friends"} />;
+      case "friend":
+        return <FriendProfileScreen key={profileId} back={() => setScreen(profileFromRef.current === "friend" ? "friends" : profileFromRef.current)} userId={profileId} me={user} go={go} onChanged={loadSocial} />;
       case "insights": return <InsightsScreen back={() => setScreen("home")} tasks={tasks} studySessions={studySessions} onLogSession={logStudySession} onRenameSession={renameStudySession} onDeleteSession={deleteStudySession} />;
       case "reminders": return <RemindersScreen back={() => setScreen("home")} reminders={reminders} onAdd={addReminder} />;
       case "profile": return <ProfileScreen back={() => setScreen("home")} user={user} onLogout={onLogout} onUserUpdate={onUserUpdate} google={google} onConnectGoogle={connectGoogle} onDisconnectGoogle={disconnectGoogle} />;
@@ -3147,7 +3709,9 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
         </div>
         {NAV_ITEMS.map((n) => (
           <div key={n.key} className="orbit-navitem" onClick={() => go(n.key)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 12, cursor: "pointer", marginBottom: 4, background: screen === n.key ? T.sidebarSoft : "transparent", color: screen === n.key ? "#fff" : "#8FB09E", boxShadow: screen === n.key ? `inset 3px 0 0 ${T.primaryBright}` : "none" }}>
-            <n.icon size={16} /><span style={{ fontSize: 13.5, fontWeight: 600 }}>{n.label}</span>
+            <n.icon size={16} /><span style={{ fontSize: 13.5, fontWeight: 600, flex: 1 }}>{n.label}</span>
+            {n.key === "messages" && <CountBadge n={socialSummary.unread_dms} />}
+            {n.key === "friends" && <CountBadge n={socialSummary.incoming_requests} />}
           </div>
         ))}
         <div className="orbit-lift" onClick={() => go("capture")} style={{ ...primaryBtn, marginTop: 18, width: "100%", boxSizing: "border-box" }}><Camera size={15} /> New capture</div>
@@ -3167,7 +3731,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
               <div onClick={() => setGoogleNotice(null)} style={{ fontSize: 12, fontWeight: 700, color: T.inkSoft, cursor: "pointer", marginTop: 4 }}>Dismiss</div>
             </div>
           )}
-          <div key={screen} className={["archive", "folder", "home", "todo", "reminders", "calendar", "groupslist", "group", "capture", "insights"].includes(screen) ? "orbit-page" : "orbit-page orbit-narrow"} >{renderScreen()}</div>
+          <div key={screen} className={["archive", "folder", "home", "todo", "reminders", "calendar", "groupslist", "group", "capture", "insights", "messages"].includes(screen) ? "orbit-page" : "orbit-page orbit-narrow"} >{renderScreen()}</div>
           <div className="orbit-bottomnav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 420, margin: "0 auto", background: "rgba(255,255,255,0.86)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", borderTop: `1px solid ${T.line}`, borderRadius: "20px 20px 0 0", boxShadow: "0 -8px 30px rgba(16,35,26,0.07)", padding: "10px 22px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             {MOBILE_NAV.map((n) => n.key === "capture" ? (
               <div key={n.key} className="orbit-fab" onClick={() => go(n.key)} style={{ width: 46, height: 46, borderRadius: 999, background: `linear-gradient(135deg, ${T.primaryLight}, ${T.primary})`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: `0 6px 18px ${T.primaryGlow}` }}>
@@ -3175,7 +3739,10 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
               </div>
             ) : (
               <div key={n.key} onClick={() => go(n.key)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, cursor: "pointer", minWidth: 44 }}>
-                <n.icon className={screen === n.key ? "orbit-bump" : undefined} size={19} color={screen === n.key ? T.primary : T.inkFaint} />
+                <span style={{ position: "relative", display: "inline-flex" }}>
+                  <n.icon className={screen === n.key ? "orbit-bump" : undefined} size={19} color={screen === n.key ? T.primary : T.inkFaint} />
+                  {n.key === "messages" && <CountBadge n={socialSummary.unread_dms + socialSummary.incoming_requests} style={{ position: "absolute", top: -7, right: -10, minWidth: 16, height: 16, fontSize: 9.5 }} />}
+                </span>
                 <span style={{ fontSize: 10, fontWeight: 700, color: screen === n.key ? T.primary : T.inkFaint }}>{n.label}</span>
               </div>
             ))}

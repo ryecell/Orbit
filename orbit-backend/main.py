@@ -21,6 +21,7 @@ import avatars
 import google_calendar
 import models
 import schemas
+import social
 from database import Base, SessionLocal, engine, get_db
 from logging_config import logger
 
@@ -349,19 +350,12 @@ def remove_avatar(user: models.User = Depends(auth.get_current_user), db: Sessio
 @app.get("/users/{user_id}/avatar")
 def get_avatar(user_id: str, user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     """
-    A picture is visible to its owner and to people who share a group with them —
-    not to everyone with an account. (It's fetched with the login token, so the
+    A picture is visible to its owner, friends (and pending requests) and people who
+    share a group with them — never across a block, and not to everyone with an account. (It's fetched with the login token, so the
     frontend loads it with fetch() and shows it from a blob URL, not a bare <img src>.)
     """
-    if user_id != user.id:
-        mine = db.query(models.GroupMembership.group_id).filter(models.GroupMembership.user_id == user.id)
-        shares_group = (
-            db.query(models.GroupMembership.id)
-            .filter(models.GroupMembership.user_id == user_id, models.GroupMembership.group_id.in_(mine))
-            .first()
-        )
-        if not shares_group:
-            raise HTTPException(status_code=404, detail="Not found")
+    if not social.can_see_user(db, user.id, user_id):
+        raise HTTPException(status_code=404, detail="Not found")
     owner = db.query(models.User).filter(models.User.id == user_id, models.User.deleted_at.is_(None)).first()
     if not owner or not owner.avatar_updated_at or not owner.avatar:
         raise HTTPException(status_code=404, detail="Not found")
@@ -1018,6 +1012,8 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+app.include_router(social.build_router(limiter))
+
 
 @app.websocket("/ws/groups/{group_id}")
 async def group_chat_ws(websocket: WebSocket, group_id: str, token: Optional[str] = Query(default=None)):
@@ -1116,6 +1112,7 @@ def _erase_user_data(db: Session, user: models.User) -> None:
             db.query(models.GroupMembership).filter(models.GroupMembership.group_id == group.id).delete(synchronize_session=False)
             db.delete(group)
 
+    social.erase_social_data(db, user.id)
     db.query(models.GroupMembership).filter(models.GroupMembership.user_id == user.id).delete(synchronize_session=False)
     db.query(models.GroupMessage).filter(models.GroupMessage.sender_id == user.id).update(
         {"sender_id": None}, synchronize_session=False
@@ -1243,8 +1240,10 @@ def export_my_data(request: Request, user: models.User = Depends(auth.get_curren
             {"group": group_names.get(m.group_id, "(group you have left)"), "text": m.text, "sent_at": m.created_at}
             for m in messages
         ],
+        **social.export_social_data(db, user.id),
         "notes": [
             "Archive items contain the title, summary and tags only; uploaded photos are not stored by Orbit.",
+            "Direct messages are included only if you sent them; messages other people sent you belong to their accounts.",
             "Group messages sent before Orbit began recording message authorship cannot be reliably attributed and are not included.",
         ],
     }

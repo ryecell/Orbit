@@ -248,3 +248,40 @@ class GroupMembership(Base):
 
     group = relationship("Group", back_populates="memberships")
     user = relationship("User")
+
+
+# ---------- friends & direct messages ----------
+
+class Friendship(Base):
+    """One row per pair. status 'pending' = requester has asked; 'accepted' = friends.
+    A pair only ever has one row (either direction) — enforced in social.py."""
+    __tablename__ = "friendships"
+    __table_args__ = (UniqueConstraint("requester_id", "addressee_id", name="uq_friendship_pair"),)
+
+    id = Column(String, primary_key=True, default=gen_id)
+    requester_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    addressee_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String, nullable=False, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    responded_at = Column(DateTime, nullable=True)
+
+
+class DirectMessage(Base):
+    __tablename__ = "direct_messages"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    sender_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    recipient_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    text = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    read_at = Column(DateTime, nullable=True)
+
+
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+    __table_args__ = (UniqueConstraint("blocker_id", "blocked_id", name="uq_user_block"),)
+
+    id = Column(String, primary_key=True, default=gen_id)
+    blocker_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    blocked_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
