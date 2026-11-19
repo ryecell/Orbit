@@ -1,0 +1,1466 @@
+import json
+import os
+import time
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+import httpx
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse, Response
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sqlalchemy import func
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.exc import IntegrityError
+
+import ai_providers
+import grades_api
+import auth
+import avatars
+import google_calendar
+import models
+import schemas
+import social
+from database import Base, SessionLocal, engine, get_db
+from logging_config import logger
+
+
+SENTRY_DSN = os.environ.get("SENTRY_DSN")
+if SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(dsn=SENTRY_DSN, traces_sample_rate=0.1, send_default_pii=False)
+    logger.info("Sentry error monitoring enabled")
+
+Base.metadata.create_all(bind=engine)
+# ^ Convenience for local SQLite dev only. In any environment managed by
+# Alembic (i.e. anywhere using DATABASE_URL/Postgres), `alembic upgrade head`
+# is the real source of truth for the schema — this call becomes a harmless
+# no-op once those tables already exist.
+
+app = FastAPI(title="Orbit API", version="1.0.0")
+
+# --- Rate limiting -----------------------------------------------------------
+# Keyed by client IP. Applied to auth endpoints (brute-force / credential
+# stuffing protection) and the AI endpoint (it costs money per call).
+# In-memory by default (fine for one process); set REDIS_URL once you run
+# more than one server instance, or limits won't be shared across them.
+_redis_url = os.environ.get("REDIS_URL")
+limiter = Limiter(key_func=get_remote_address, storage_uri=_redis_url or "memory://")
+if not _redis_url:
+    logger.info("REDIS_URL not set — rate limiting is in-memory (per process only).")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Catch-all for unexpected crashes: logs the traceback (and reports to
+    Sentry if configured) and returns a clean JSON 500 instead of a raw
+    traceback.
+
+    NOTE: Starlette runs this from its outermost error layer, which is
+    outside any middleware added with add_middleware() — so on its own this
+    does NOT give the response CORS headers. That's handled by wrapping the
+    whole app in CORSMiddleware at the bottom of this file. Both pieces are
+    needed: this makes the body clean, the wrapper makes it readable by the
+    browser.
+    """
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    if SENTRY_DSN:
+        import sentry_sdk as _sentry_sdk
+
+        _sentry_sdk.capture_exception(exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+# --- CORS ----------------------------------------------------------------------
+# Default to the local Vite dev server only — NOT a wildcard — so a forgotten
+# env var fails safely instead of quietly allowing every origin on the internet.
+_raw_origins = os.environ.get("ORBIT_ALLOWED_ORIGINS")
+if _raw_origins:
+    allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    if "*" in allowed_origins:
+        print("[orbit] WARNING: ORBIT_ALLOWED_ORIGINS includes '*'. Fine for local testing, unsafe in production.")
+else:
+    allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    print(
+        "[orbit] ORBIT_ALLOWED_ORIGINS is not set — defaulting to the local Vite dev "
+        "server only (http://localhost:5173). Set it explicitly for any other frontend origin."
+    )
+
+# Diagnostic: prints the exact parsed list on every startup, so a CORS
+# mismatch can be confirmed by reading logs instead of guessing whether the
+# env var actually took effect, has a typo, or has hidden whitespace.
+print(f"[orbit] CORS allowed origins (parsed): {allowed_origins!r}")
+
+# CORS is applied by wrapping the whole app at the very bottom of this file,
+# not via app.add_middleware() — see the comment there for why.
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # Only meaningful over HTTPS — browsers ignore it on plain HTTP, so it's
+    # harmless to always send but won't do anything until you're behind TLS.
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    return response
+
+# (name, color, icon key) — seeded in this order for every new account.
+# Only "Personal" to start; everything else is created by the person themselves.
+DEFAULT_FOLDERS = [
+    ("Personal", "#2F9159", "user"),
+]
+
+
+# ============================== AUTH ==============================
+
+@app.post("/auth/register", response_model=schemas.Token, status_code=status.HTTP_201_CREATED)
+@limiter.limit("5/minute")
+def register(request: Request, payload: schemas.UserCreate, db: Session = Depends(get_db)):
+    if db.query(models.User).filter(models.User.username == payload.username).first():
+        raise HTTPException(status_code=400, detail="That username is already taken")
+
+    if payload.email and db.query(models.User).filter(models.User.email == payload.email).first():
+        raise HTTPException(status_code=400, detail="An account with this email already exists")
+
+    user = models.User(
+        username=payload.username,
+        name=payload.name or payload.username,
+        email=payload.email,  # may be None — column is nullable
+        hashed_password=auth.hash_password(payload.password),
+        is_verified=False,
+        accepted_terms_at=datetime.utcnow(),
+    )
+
+    if payload.email:
+        verification_token, verification_expires = auth.generate_verification_token()
+        user.verification_token = verification_token
+        user.verification_expires = verification_expires
+
+    try:
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    except IntegrityError:
+        db.rollback()
+        logger.exception("Registration conflict for username=%s", payload.username)
+        raise HTTPException(status_code=400, detail="Could not create account")
+
+    # Seed default folders. If this fails, keep the account — a missing
+    # folder set is recoverable; a half-created user is worse.
+    try:
+        for position, (name, color, icon) in enumerate(DEFAULT_FOLDERS):
+            db.add(models.Folder(name=name, color=color, icon=icon, position=position, owner_id=user.id))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to seed default folders for user %s", user.id)
+
+    if payload.email:
+        auth.send_verification_email(user.email, user.verification_token)
+
+    token = auth.create_access_token({"sub": user.id})
+    return schemas.Token(access_token=token, user=user)
+
+@app.get("/auth/verify")
+def verify_email(token: str, db: Session = Depends(get_db)):
+    from fastapi.responses import HTMLResponse
+
+    user = db.query(models.User).filter(models.User.verification_token == token).first()
+    if not user or not user.verification_expires or user.verification_expires < datetime.utcnow():
+        return HTMLResponse("<h3>This verification link is invalid or has expired.</h3>", status_code=400)
+
+    user.is_verified = True
+    user.verification_token = None
+    user.verification_expires = None
+    db.commit()
+    return HTMLResponse("<h3>Email verified — you can close this tab and return to Orbit.</h3>")
+
+
+@app.post("/auth/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("3/minute")
+def resend_verification(request: Request, user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    if not user.email:
+        raise HTTPException(status_code=400, detail="No email is linked to this account yet.")
+    if user.is_verified:
+        return {"detail": "Already verified"}
+    token, expires = auth.generate_verification_token()
+    user.verification_token = token
+    user.verification_expires = expires
+    db.commit()
+    auth.send_verification_email(user.email, token)
+    return {"detail": "Verification email sent"}
+
+
+@app.patch("/me/email", response_model=schemas.UserOut)
+@limiter.limit("3/minute")
+def link_email(
+    request: Request,
+    payload: schemas.LinkEmailRequest,
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Add or change the email linked to an existing account. Always requires re-verification."""
+    existing = db.query(models.User).filter(models.User.email == payload.email, models.User.id != user.id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="That email is already linked to another account")
+
+    token, expires = auth.generate_verification_token()
+    user.email = payload.email
+    user.is_verified = False
+    user.verification_token = token
+    user.verification_expires = expires
+    db.commit()
+    db.refresh(user)
+
+    auth.send_verification_email(user.email, token)
+    logger.info("Email linked to account %s, pending verification", user.username)
+    return user
+
+
+@app.post("/auth/login", response_model=schemas.Token)
+@limiter.limit("10/minute")
+def login(request: Request, payload: schemas.UserLogin, db: Session = Depends(get_db)):
+    username = payload.username.strip().lower()
+    user = db.query(models.User).filter(models.User.username == username).first()
+
+    # Same generic error whether the username doesn't exist or the password
+    # is wrong — distinguishing the two lets an attacker enumerate accounts.
+    generic_error = HTTPException(status_code=401, detail="Incorrect username or password")
+
+    if not user or user.deleted_at:
+        raise generic_error
+
+    if auth.is_locked(user):
+        minutes_left = max(1, int((user.locked_until - datetime.utcnow()).total_seconds() // 60) + 1)
+        raise HTTPException(
+            status_code=423,
+            detail=f"Too many failed attempts. Try again in about {minutes_left} minute(s).",
+        )
+
+    if not auth.verify_password(payload.password, user.hashed_password):
+        auth.register_failed_login(user, db)
+        raise generic_error
+
+    auth.register_successful_login(user, db)
+    _maybe_purge()
+    token = auth.create_access_token({"sub": user.id})
+    return schemas.Token(access_token=token, user=user)
+
+
+@app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    token: str = Depends(auth.oauth2_scheme),
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    auth.revoke_token(token, db)
+    logger.info("Token revoked on logout: %s", user.username)
+
+
+@app.post("/auth/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("3/minute")
+def forgot_password(request: Request, payload: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Identified by username now, not email — email may not exist for this
+    account. Always returns the same generic response regardless of whether
+    the username exists or has an email linked, to prevent enumeration.
+    """
+    generic_response = {"detail": "If that account has an email on file, a reset link has been sent to it."}
+
+    username = payload.username.strip().lower()
+    user = db.query(models.User).filter(models.User.username == username).first()
+    if not user or not user.email:
+        return generic_response
+
+    token, expires = auth.generate_password_reset_token()
+    user.reset_token = token
+    user.reset_expires = expires
+    db.commit()
+
+    auth.send_password_reset_email(user.email, token)
+    logger.info("Password reset requested for %s", user.username)
+    return generic_response
+
+
+@app.post("/auth/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("5/minute")
+def reset_password(request: Request, payload: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.reset_token == payload.token).first()
+    if not user or not user.reset_expires or user.reset_expires < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired.")
+
+    user.hashed_password = auth.hash_password(payload.new_password)
+    user.reset_token = None
+    user.reset_expires = None
+    # Also clear any lockout — a successful reset is a legitimate way back
+    # into the account, it shouldn't stay locked from the failed attempts
+    # that led here.
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    # Invalidate every token issued before this moment, including the one
+    # in the browser that's still "logged in" from before the reset.
+    user.sessions_invalidated_at = datetime.utcnow()
+    db.commit()
+
+    logger.info("Password reset completed for %s", user.email)
+
+
+@app.get("/me", response_model=schemas.UserOut)
+def me(current_user: models.User = Depends(auth.get_current_user)):
+    return current_user
+
+
+# ---------- profile picture ----------
+
+@app.put("/me/avatar", response_model=schemas.UserOut)
+@limiter.limit("10/minute")
+def set_avatar(
+    request: Request,
+    payload: schemas.AvatarUpload,
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        jpeg = avatars.process_avatar(avatars.decode_data_url(payload.image))
+    except avatars.AvatarError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    user.avatar = jpeg
+    user.avatar_updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/me/avatar", response_model=schemas.UserOut)
+def remove_avatar(user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    user.avatar = None
+    user.avatar_updated_at = None
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.get("/users/{user_id}/avatar")
+def get_avatar(user_id: str, user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """
+    A picture is visible to its owner, friends (and pending requests) and people who
+    share a group with them — never across a block, and not to everyone with an account. (It's fetched with the login token, so the
+    frontend loads it with fetch() and shows it from a blob URL, not a bare <img src>.)
+    """
+    if not social.can_see_user(db, user.id, user_id):
+        raise HTTPException(status_code=404, detail="Not found")
+    owner = db.query(models.User).filter(models.User.id == user_id, models.User.deleted_at.is_(None)).first()
+    if not owner or not owner.avatar_updated_at or not owner.avatar:
+        raise HTTPException(status_code=404, detail="Not found")
+    return Response(
+        content=owner.avatar,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+        },
+    )
+
+
+@app.patch("/me", response_model=schemas.UserOut)
+@limiter.limit("10/minute")
+def update_profile(
+    request: Request,
+    payload: schemas.UpdateProfileRequest,
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Change the display name. The username (login identifier) can't be changed."""
+    if payload.name != user.name:
+        user.name = payload.name
+        # Chat messages store the sender's name as text, so bring this person's
+        # earlier messages along — otherwise one chat would show two names for
+        # them. Only messages with a recorded author (sender_id) can be matched.
+        db.query(models.GroupMessage).filter(models.GroupMessage.sender_id == user.id).update(
+            {"sender_name": payload.name}, synchronize_session=False
+        )
+        db.commit()
+        db.refresh(user)
+        logger.info("Display name changed for account %s", user.id)
+    return user
+
+
+# ============================== FOLDERS & ITEMS ==============================
+
+def _item_out(item: models.Item) -> dict:
+    return {
+        "id": item.id,
+        "title": item.title,
+        "summary": item.summary,
+        "tags": [t for t in item.tags.split(",") if t],
+        "created_at": item.created_at,
+        "checklist": [{"id": c.id, "text": c.text, "done": bool(c.done)} for c in item.checklist],
+    }
+
+
+def _folder_out(folder: models.Folder) -> dict:
+    return {
+        "id": folder.id,
+        "name": folder.name,
+        "color": folder.color,
+        "icon": folder.icon,
+        "position": folder.position,
+        "items": [_item_out(i) for i in folder.items],
+    }
+
+
+@app.get("/folders", response_model=List[schemas.FolderOut])
+def list_folders(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    folders = (
+        db.query(models.Folder)
+        .options(selectinload(models.Folder.items).selectinload(models.Item.checklist))
+        .filter(models.Folder.owner_id == user.id)
+        .order_by(models.Folder.position.asc(), func.lower(models.Folder.name).asc())
+        .all()
+    )
+    return [_folder_out(f) for f in folders]
+
+
+MAX_FOLDERS_PER_USER = 40
+
+
+def _folder_name_taken(db: Session, user: models.User, name: str, exclude_id: Optional[str] = None) -> bool:
+    # Case-insensitive: the app addresses folders by name in places (e.g. AI filing),
+    # so "physics" and "Physics" would be indistinguishable to the person anyway.
+    q = db.query(models.Folder.id).filter(models.Folder.owner_id == user.id, func.lower(models.Folder.name) == name.lower())
+    if exclude_id:
+        q = q.filter(models.Folder.id != exclude_id)
+    return q.first() is not None
+
+
+@app.post("/folders", response_model=schemas.FolderOut, status_code=status.HTTP_201_CREATED)
+def create_folder(payload: schemas.FolderCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    count = db.query(func.count(models.Folder.id)).filter(models.Folder.owner_id == user.id).scalar() or 0
+    if count >= MAX_FOLDERS_PER_USER:
+        raise HTTPException(status_code=400, detail=f"You can have up to {MAX_FOLDERS_PER_USER} folders")
+    if _folder_name_taken(db, user, payload.name):
+        raise HTTPException(status_code=400, detail="You already have a folder with that name")
+    last = db.query(func.max(models.Folder.position)).filter(models.Folder.owner_id == user.id).scalar()
+    folder = models.Folder(
+        name=payload.name, color=payload.color, icon=payload.icon,
+        position=(last + 1) if last is not None else 0, owner_id=user.id,
+    )
+    db.add(folder)
+    db.commit()
+    db.refresh(folder)
+    return _folder_out(folder)
+
+
+def _get_owned_folder(folder_id: str, db: Session, user: models.User) -> models.Folder:
+    folder = (
+        db.query(models.Folder)
+        .filter(models.Folder.id == folder_id, models.Folder.owner_id == user.id)
+        .first()
+    )
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return folder
+
+
+@app.put("/folders/order", status_code=status.HTTP_204_NO_CONTENT)
+def reorder_folders(payload: schemas.FolderReorder, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    """Saves a new Archive order. `ids` is the desired order; any folders not listed keep their relative order after it."""
+    owned = {f.id: f for f in db.query(models.Folder).filter(models.Folder.owner_id == user.id).all()}
+    ids = list(dict.fromkeys(payload.ids))
+    if any(i not in owned for i in ids):
+        raise HTTPException(status_code=400, detail="Unknown folder in order")
+    position = 0
+    for folder_id in ids:
+        owned[folder_id].position = position
+        position += 1
+    listed = set(ids)
+    for folder in sorted((f for fid, f in owned.items() if fid not in listed), key=lambda f: (f.position, f.name.lower())):
+        folder.position = position
+        position += 1
+    db.commit()
+
+
+@app.patch("/folders/{folder_id}", response_model=schemas.FolderOut)
+def update_folder(folder_id: str, payload: schemas.FolderUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    folder = _get_owned_folder(folder_id, db, user)
+    changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+    if "name" in changes and _folder_name_taken(db, user, changes["name"], exclude_id=folder.id):
+        raise HTTPException(status_code=400, detail="You already have a folder with that name")
+    for field, value in changes.items():
+        setattr(folder, field, value)
+    db.commit()
+    db.refresh(folder)
+    return _folder_out(folder)
+
+
+@app.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_folder(folder_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    """Deletes the folder and every item inside it (cascade) — the frontend asks for confirmation first."""
+    folder = _get_owned_folder(folder_id, db, user)
+    # Tasks linked to this folder (or its items) keep existing — they just lose the link.
+    db.query(models.Task).filter(models.Task.owner_id == user.id, models.Task.folder_id == folder.id).update(
+        {"folder_id": None, "item_id": None}, synchronize_session=False
+    )
+    db.query(models.GradeSubject).filter(models.GradeSubject.owner_id == user.id, models.GradeSubject.folder_id == folder.id).update(
+        {"folder_id": None}, synchronize_session=False
+    )
+    db.delete(folder)
+    db.commit()
+
+
+@app.post("/folders/{folder_id}/items", response_model=schemas.ItemOut, status_code=status.HTTP_201_CREATED)
+def add_item(folder_id: str, payload: schemas.ItemCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    folder = _get_owned_folder(folder_id, db, user)
+    item = models.Item(
+        title=payload.title,
+        summary=payload.summary,
+        tags=",".join(payload.tags),
+        folder_id=folder.id,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _item_out(item)
+
+
+@app.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_item(item_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    item = (
+        db.query(models.Item)
+        .join(models.Folder)
+        .filter(models.Item.id == item_id, models.Folder.owner_id == user.id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    # Tasks about this item stay, but now just point at its folder.
+    db.query(models.Task).filter(models.Task.owner_id == user.id, models.Task.item_id == item.id).update(
+        {"item_id": None}, synchronize_session=False
+    )
+    db.delete(item)
+    db.commit()
+
+
+# ----- checklists inside archive items -----
+
+MAX_CHECKLIST_PER_ITEM = 50
+
+
+def _get_owned_item(item_id: str, db: Session, user: models.User) -> models.Item:
+    item = (
+        db.query(models.Item)
+        .join(models.Folder)
+        .filter(models.Item.id == item_id, models.Folder.owner_id == user.id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+
+def _get_owned_entry(entry_id: str, db: Session, user: models.User) -> models.ChecklistEntry:
+    entry = (
+        db.query(models.ChecklistEntry)
+        .join(models.Item, models.ChecklistEntry.item_id == models.Item.id)
+        .join(models.Folder, models.Item.folder_id == models.Folder.id)
+        .filter(models.ChecklistEntry.id == entry_id, models.Folder.owner_id == user.id)
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Checklist line not found")
+    return entry
+
+
+@app.post("/items/{item_id}/checklist", response_model=schemas.ChecklistOut, status_code=status.HTTP_201_CREATED)
+def add_checklist_entry(item_id: str, payload: schemas.ChecklistCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    item = _get_owned_item(item_id, db, user)
+    count = db.query(func.count(models.ChecklistEntry.id)).filter(models.ChecklistEntry.item_id == item.id).scalar() or 0
+    if count >= MAX_CHECKLIST_PER_ITEM:
+        raise HTTPException(status_code=400, detail=f"A checklist can have at most {MAX_CHECKLIST_PER_ITEM} lines")
+    last = db.query(func.max(models.ChecklistEntry.position)).filter(models.ChecklistEntry.item_id == item.id).scalar()
+    entry = models.ChecklistEntry(item_id=item.id, text=payload.text, position=(last + 1) if last is not None else 0)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.patch("/checklist/{entry_id}", response_model=schemas.ChecklistOut)
+def update_checklist_entry(entry_id: str, payload: schemas.ChecklistUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    entry = _get_owned_entry(entry_id, db, user)
+    for field, value in payload.model_dump(exclude_unset=True, exclude_none=True).items():
+        setattr(entry, field, value)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.delete("/checklist/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_checklist_entry(entry_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    entry = _get_owned_entry(entry_id, db, user)
+    db.delete(entry)
+    db.commit()
+
+
+# ============================== TASKS ==============================
+
+def _resolve_task_link(db: Session, user: models.User, folder_id, item_id):
+    """Validates that the linked folder/item belongs to this user. An item implies its folder."""
+    if item_id:
+        item = _get_owned_item(item_id, db, user)
+        return item.folder_id, item.id
+    if folder_id:
+        return _get_owned_folder(folder_id, db, user).id, None
+    return None, None
+
+
+@app.get("/tasks", response_model=List[schemas.TaskOut])
+def list_tasks(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    return db.query(models.Task).filter(models.Task.owner_id == user.id).all()
+
+
+@app.post("/tasks", response_model=schemas.TaskOut, status_code=status.HTTP_201_CREATED)
+def create_task(payload: schemas.TaskCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    folder_id, item_id = _resolve_task_link(db, user, payload.folder_id, payload.item_id)
+    task = models.Task(
+        text=payload.text, priority=payload.priority, due_date=payload.due_date, owner_id=user.id,
+        folder_id=folder_id, item_id=item_id,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@app.patch("/tasks/{task_id}", response_model=schemas.TaskOut)
+def update_task(task_id: str, payload: schemas.TaskUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.owner_id == user.id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    changes = payload.model_dump(exclude_unset=True)
+    if "folder_id" in changes or "item_id" in changes:
+        task.folder_id, task.item_id = _resolve_task_link(db, user, changes.pop("folder_id", None), changes.pop("item_id", None))
+    for field, value in changes.items():
+        setattr(task, field, value)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_task(task_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.owner_id == user.id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    db.delete(task)
+    db.commit()
+
+
+# ============================== REMINDERS ==============================
+
+@app.get("/reminders", response_model=List[schemas.ReminderOut])
+def list_reminders(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    return db.query(models.Reminder).filter(models.Reminder.owner_id == user.id).all()
+
+
+@app.post("/reminders", response_model=schemas.ReminderOut, status_code=status.HTTP_201_CREATED)
+def create_reminder(payload: schemas.ReminderCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    reminder = models.Reminder(
+        title=payload.title, detail=payload.detail, kind=payload.kind, owner_id=user.id
+    )
+    db.add(reminder)
+    db.commit()
+    db.refresh(reminder)
+    return reminder
+
+
+# ============================== CALENDAR EVENTS ==============================
+
+@app.get("/events", response_model=List[schemas.EventOut])
+def list_events(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    # No date-range filtering server-side — the calendar screen fetches the
+    # full list and filters by month client-side, same pattern as tasks and
+    # reminders. Fine at personal-archive scale; would want a range filter
+    # if this ever needed to handle years of events.
+    return db.query(models.Event).filter(models.Event.owner_id == user.id).order_by(models.Event.start_time.asc()).all()
+
+
+@app.post("/events", response_model=schemas.EventOut, status_code=status.HTTP_201_CREATED)
+def create_event(payload: schemas.EventCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    event = models.Event(
+        title=payload.title,
+        description=payload.description,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        color=payload.color,
+        owner_id=user.id,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    _push_event_to_google(db, user.id, event)
+    return event
+
+
+@app.patch("/events/{event_id}", response_model=schemas.EventOut)
+def update_event(event_id: str, payload: schemas.EventUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    event = db.query(models.Event).filter(models.Event.id == event_id, models.Event.owner_id == user.id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(event, field, value)
+    db.commit()
+    db.refresh(event)
+    _push_event_to_google(db, user.id, event)
+    return event
+
+
+@app.delete("/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_event(event_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    event = db.query(models.Event).filter(models.Event.id == event_id, models.Event.owner_id == user.id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    google_event_id = event.google_event_id
+    db.delete(event)
+    db.commit()
+    if google_event_id:
+        _remove_event_from_google(db, user.id, google_event_id)
+
+
+# ============================== GOOGLE CALENDAR SYNC ==============================
+
+GOOGLE_STATE_MINUTES = 10
+
+
+def _google_conn(db: Session, user_id: str):
+    return db.query(models.GoogleConnection).filter(models.GoogleConnection.user_id == user_id).first()
+
+
+def _push_event_to_google(db: Session, user_id: str, event: models.Event) -> None:
+    """Best-effort: a Google hiccup must never make saving an Orbit event fail."""
+    if not google_calendar.is_configured():
+        return
+    conn = _google_conn(db, user_id)
+    if not conn or conn.needs_reauth:
+        return
+    try:
+        gid = google_calendar.upsert_event(conn, event)
+        if event.google_event_id != gid:
+            event.google_event_id = gid
+            db.commit()
+            db.refresh(event)
+    except google_calendar.GoogleAuthError:
+        conn.needs_reauth = True
+        google_calendar.forget_access_token(user_id)
+        db.commit()
+        logger.warning("Google connection needs reauthorization (user %s)", user_id)
+    except Exception:
+        db.rollback()
+        logger.exception("Could not push event to Google Calendar")
+
+
+def _remove_event_from_google(db: Session, user_id: str, google_event_id: str) -> None:
+    if not google_calendar.is_configured():
+        return
+    conn = _google_conn(db, user_id)
+    if not conn or conn.needs_reauth:
+        return
+    try:
+        google_calendar.delete_event(conn, google_event_id)
+    except google_calendar.GoogleAuthError:
+        conn.needs_reauth = True
+        google_calendar.forget_access_token(user_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Could not delete event from Google Calendar")
+
+
+@app.get("/integrations/google")
+def google_status(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    if not google_calendar.is_configured():
+        return {"configured": False, "connected": False, "needs_reauth": False, "email": None}
+    conn = _google_conn(db, user.id)
+    return {
+        "configured": True,
+        "connected": bool(conn),
+        "needs_reauth": bool(conn and conn.needs_reauth),
+        "email": conn.google_email if conn else None,
+    }
+
+
+@app.post("/integrations/google/connect")
+@limiter.limit("10/minute")
+def google_connect(
+    request: Request,
+    payload: schemas.GoogleConnectRequest,
+    user: models.User = Depends(auth.get_current_user),
+):
+    """Returns the Google consent-screen URL. The frontend sends the browser there."""
+    if not google_calendar.is_configured():
+        raise HTTPException(status_code=503, detail="Google Calendar sync isn't set up on this server yet.")
+    state = auth.jwt.encode(
+        {
+            # "uid", deliberately not "sub": this token must never work as a login token.
+            "uid": user.id,
+            "purpose": "google-calendar",
+            "tz": google_calendar.valid_timezone(payload.timezone),
+            "exp": datetime.utcnow() + timedelta(minutes=GOOGLE_STATE_MINUTES),
+        },
+        auth.SECRET_KEY,
+        algorithm=auth.ALGORITHM,
+    )
+    return {"url": google_calendar.build_auth_url(state)}
+
+
+@app.get("/integrations/google/callback")
+@limiter.limit("20/minute")
+def google_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Google sends the browser back here. There's no Orbit login header on this
+    request, so the signed `state` (made in /connect) is what proves who it's for."""
+    frontend = os.environ.get("ORBIT_PUBLIC_FRONTEND_URL", "http://localhost:5173").rstrip("/")
+
+    def back(result: str):
+        return RedirectResponse(f"{frontend}/?google={result}", status_code=303)
+
+    if error or not code or not state:
+        return back("cancelled")
+    try:
+        claims = auth.jwt.decode(state, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
+        if claims.get("purpose") != "google-calendar" or not claims.get("uid"):
+            return back("error")
+    except Exception:
+        return back("error")
+
+    user = db.query(models.User).filter(models.User.id == claims["uid"], models.User.deleted_at.is_(None)).first()
+    if not user or not google_calendar.is_configured():
+        return back("error")
+
+    try:
+        result = google_calendar.exchange_code(code)
+    except google_calendar.GoogleError:
+        return back("error")
+    if google_calendar.CALENDAR_SCOPE not in (result["scope"] or "").split():
+        return back("denied")  # they unticked the calendar permission on Google's screen
+    if not result["refresh_token"]:
+        return back("error")
+
+    conn = _google_conn(db, user.id)
+    if conn:
+        conn.refresh_token_enc = google_calendar.encrypt(result["refresh_token"])
+        conn.google_email = result["email"]
+        conn.timezone = claims.get("tz", "UTC")
+        conn.needs_reauth = False
+    else:
+        db.add(models.GoogleConnection(
+            user_id=user.id,
+            refresh_token_enc=google_calendar.encrypt(result["refresh_token"]),
+            google_email=result["email"],
+            timezone=claims.get("tz", "UTC"),
+        ))
+    db.commit()
+    google_calendar.forget_access_token(user.id)
+    logger.info("Google Calendar connected (user %s)", user.id)
+    return back("connected")
+
+
+@app.post("/integrations/google/sync")
+@limiter.limit("5/minute")
+def google_sync_existing(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    """Pushes upcoming Orbit events that aren't in Google yet (e.g. ones made before connecting)."""
+    conn = _google_conn(db, user.id)
+    if not google_calendar.is_configured() or not conn:
+        raise HTTPException(status_code=400, detail="Connect Google Calendar first.")
+    if conn.needs_reauth:
+        raise HTTPException(status_code=409, detail="Google needs to be reconnected.")
+    pending = (
+        db.query(models.Event)
+        .filter(
+            models.Event.owner_id == user.id,
+            models.Event.google_event_id.is_(None),
+            models.Event.start_time >= datetime.utcnow() - timedelta(days=1),
+        )
+        .order_by(models.Event.start_time.asc())
+        .limit(50)
+        .all()
+    )
+    synced = 0
+    for ev in pending:
+        _push_event_to_google(db, user.id, ev)
+        if ev.google_event_id:
+            synced += 1
+        if conn.needs_reauth:
+            break
+    return {"synced": synced, "attempted": len(pending), "needs_reauth": bool(conn.needs_reauth)}
+
+
+@app.delete("/integrations/google", status_code=status.HTTP_204_NO_CONTENT)
+def google_disconnect(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    """Disconnects. Events already copied to Google stay there — they're the person's."""
+    conn = _google_conn(db, user.id)
+    if not conn:
+        return
+    google_calendar.revoke(conn.refresh_token_enc)
+    google_calendar.forget_access_token(user.id)
+    db.delete(conn)
+    db.query(models.Event).filter(models.Event.owner_id == user.id).update(
+        {"google_event_id": None}, synchronize_session=False
+    )
+    db.commit()
+
+
+# ============================== STUDY SESSIONS (INSIGHTS) ==============================
+
+@app.get("/study-sessions", response_model=List[schemas.StudySessionOut])
+def list_study_sessions(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    return (
+        db.query(models.StudySession)
+        .filter(models.StudySession.owner_id == user.id)
+        .order_by(models.StudySession.started_at.desc())
+        .limit(200)
+        .all()
+    )
+
+
+@app.post("/study-sessions", response_model=schemas.StudySessionOut, status_code=status.HTTP_201_CREATED)
+def create_study_session(payload: schemas.StudySessionCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    session_row = models.StudySession(
+        minutes=payload.minutes,
+        title=payload.title or None,
+        note=payload.note,
+        started_at=payload.started_at or datetime.utcnow(),
+        owner_id=user.id,
+    )
+    db.add(session_row)
+    db.commit()
+    db.refresh(session_row)
+    return session_row
+
+
+def _get_owned_session(session_id: str, db: Session, user: models.User) -> models.StudySession:
+    row = (
+        db.query(models.StudySession)
+        .filter(models.StudySession.id == session_id, models.StudySession.owner_id == user.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Study session not found")
+    return row
+
+
+@app.patch("/study-sessions/{session_id}", response_model=schemas.StudySessionOut)
+def rename_study_session(session_id: str, payload: schemas.StudySessionUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    row = _get_owned_session(session_id, db, user)
+    row.title = payload.title or None
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@app.delete("/study-sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_study_session(session_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    row = _get_owned_session(session_id, db, user)
+    db.delete(row)
+    db.commit()
+
+
+# ============================== GROUPS ==============================
+
+def _require_membership(group_id: str, user_id: str, db: Session) -> models.Group:
+    """Raises 404 (not 403) for both 'group doesn't exist' and 'not a member' —
+    a 403 would confirm the group exists to someone probing random IDs."""
+    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    member = (
+        db.query(models.GroupMembership)
+        .filter(models.GroupMembership.group_id == group_id, models.GroupMembership.user_id == user_id)
+        .first()
+    )
+    if not member:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return group
+
+
+def _group_out(group: models.Group, db: Session) -> dict:
+    count = db.query(models.GroupMembership).filter(models.GroupMembership.group_id == group.id).count()
+    return {"id": group.id, "name": group.name, "invite_code": group.invite_code, "member_count": count}
+
+
+@app.get("/groups", response_model=List[schemas.GroupOut])
+def list_my_groups(db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    memberships = db.query(models.GroupMembership).filter(models.GroupMembership.user_id == user.id).all()
+    groups = [m.group for m in memberships]
+    return [_group_out(g, db) for g in groups]
+
+
+@app.post("/groups", response_model=schemas.GroupOut, status_code=status.HTTP_201_CREATED)
+def create_group(payload: schemas.GroupCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    group = models.Group(name=payload.name, created_by=user.id)
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    db.add(models.GroupMembership(group_id=group.id, user_id=user.id))
+    db.commit()
+
+    return _group_out(group, db)
+
+
+@app.post("/groups/join", response_model=schemas.GroupOut)
+@limiter.limit("10/minute")
+def join_group(request: Request, payload: schemas.JoinGroupRequest, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    group = db.query(models.Group).filter(models.Group.invite_code == payload.invite_code.strip()).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="No group found with that invite code")
+
+    existing = (
+        db.query(models.GroupMembership)
+        .filter(models.GroupMembership.group_id == group.id, models.GroupMembership.user_id == user.id)
+        .first()
+    )
+    if not existing:
+        db.add(models.GroupMembership(group_id=group.id, user_id=user.id))
+        db.commit()
+
+    return _group_out(group, db)
+
+
+@app.post("/groups/{group_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+def leave_group(group_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    membership = (
+        db.query(models.GroupMembership)
+        .filter(models.GroupMembership.group_id == group_id, models.GroupMembership.user_id == user.id)
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=404, detail="Group not found")
+    db.delete(membership)
+    db.commit()
+
+
+# ============================== GROUP CHAT ==============================
+
+@app.get("/groups/{group_id}/messages", response_model=List[schemas.MessageOut])
+def list_messages(group_id: str, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    _require_membership(group_id, user.id, db)
+    return (
+        db.query(models.GroupMessage)
+        .filter(models.GroupMessage.group_id == group_id)
+        .order_by(models.GroupMessage.created_at.asc())
+        .all()
+    )
+
+
+@app.post("/groups/{group_id}/messages", response_model=schemas.MessageOut, status_code=status.HTTP_201_CREATED)
+def post_message(group_id: str, payload: schemas.MessageCreate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    _require_membership(group_id, user.id, db)
+    # sender_name comes from the authenticated user, never from the request body —
+    # trusting a client-supplied name would let anyone post as anyone else.
+    msg = models.GroupMessage(group_id=group_id, sender_id=user.id, sender_name=user.name, text=payload.text[:2000])
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return msg
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, group_id: str, ws: WebSocket):
+        await ws.accept()
+        self.active.setdefault(group_id, []).append(ws)
+
+    def disconnect(self, group_id: str, ws: WebSocket):
+        if ws in self.active.get(group_id, []):
+            self.active[group_id].remove(ws)
+
+    async def broadcast(self, group_id: str, message: dict):
+        for ws in self.active.get(group_id, []):
+            await ws.send_json(message)
+
+
+manager = ConnectionManager()
+
+app.include_router(social.build_router(limiter))
+app.include_router(grades_api.build_router())
+
+
+@app.websocket("/ws/groups/{group_id}")
+async def group_chat_ws(websocket: WebSocket, group_id: str, token: Optional[str] = Query(default=None)):
+    """
+    Real-time chat, now authenticated. Connect with:
+        /ws/groups/{group_id}?token=<the same JWT used for REST calls>
+    Browsers can't set custom headers on a WebSocket handshake, so the token
+    travels as a query param instead of an Authorization header — this is
+    the standard workaround, but it does mean the token can end up in
+    server access logs, so keep those logs access-controlled.
+
+    The connection is validated BEFORE it's accepted: if the token is
+    missing or invalid, we close the handshake instead of letting the
+    client in and only then checking. sender_name is taken from the
+    authenticated user, never from the client message, to prevent identity
+    spoofing in the chat.
+    """
+    if not token:
+        await websocket.close(code=4401)
+        return
+
+    db = SessionLocal()
+    try:
+        user = auth.get_current_user(token=token, db=db)
+        _require_membership(group_id, user.id, db)  # also 404s a nonexistent group
+    except HTTPException:
+        await websocket.close(code=4401)
+        db.close()
+        return
+
+    await manager.connect(group_id, websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            text = (data.get("text") or "").strip()
+            if not text:
+                continue
+            # This connection can outlive a display-name change (or an account
+            # deletion) made from another tab, so re-read the user every message.
+            db.refresh(user)
+            if user.deleted_at:
+                await websocket.close(code=4401)
+                break
+            msg = models.GroupMessage(
+                group_id=group_id,
+                sender_id=user.id,
+                sender_name=user.name,
+                text=text[:2000],
+            )
+            db.add(msg)
+            db.commit()
+            db.refresh(msg)
+            await manager.broadcast(
+                group_id,
+                {
+                    "id": msg.id,
+                    "sender_id": msg.sender_id,
+                    "sender_name": msg.sender_name,
+                    "text": msg.text,
+                    "created_at": msg.created_at.isoformat(),
+                },
+            )
+    except WebSocketDisconnect:
+        manager.disconnect(group_id, websocket)
+    finally:
+        db.close()
+
+
+# ============================== ACCOUNT DELETION & DATA EXPORT ==============================
+
+ACCOUNT_GRACE_DAYS = 30
+
+
+def _erase_user_data(db: Session, user: models.User) -> None:
+    """
+    Removes everything the person created and anonymizes the account row.
+    Does NOT commit — the caller does, so it's all-or-nothing.
+
+    Group messages are deliberately kept (the Privacy Policy says they stay
+    visible under the display name they were posted with); we only detach
+    them from the account by clearing sender_id.
+    """
+    # Groups this person created: hand ownership to the longest-standing other
+    # member so the group keeps working; if nobody else is in it, remove it.
+    for group in db.query(models.Group).filter(models.Group.created_by == user.id).all():
+        successor = (
+            db.query(models.GroupMembership)
+            .filter(models.GroupMembership.group_id == group.id, models.GroupMembership.user_id != user.id)
+            .order_by(models.GroupMembership.joined_at.asc())
+            .first()
+        )
+        if successor:
+            group.created_by = successor.user_id
+        else:
+            db.query(models.GroupMessage).filter(models.GroupMessage.group_id == group.id).delete(synchronize_session=False)
+            db.query(models.GroupMembership).filter(models.GroupMembership.group_id == group.id).delete(synchronize_session=False)
+            db.delete(group)
+
+    social.erase_social_data(db, user.id)
+    grades_api.erase_grades(db, user.id)
+    db.query(models.GroupMembership).filter(models.GroupMembership.user_id == user.id).delete(synchronize_session=False)
+    db.query(models.GroupMessage).filter(models.GroupMessage.sender_id == user.id).update(
+        {"sender_id": None}, synchronize_session=False
+    )
+
+    folder_ids = [r[0] for r in db.query(models.Folder.id).filter(models.Folder.owner_id == user.id).all()]
+    db.query(models.Task).filter(models.Task.owner_id == user.id).delete(synchronize_session=False)  # before folders/items they may point at
+    if folder_ids:
+        item_ids = [r[0] for r in db.query(models.Item.id).filter(models.Item.folder_id.in_(folder_ids)).all()]
+        if item_ids:
+            db.query(models.ChecklistEntry).filter(models.ChecklistEntry.item_id.in_(item_ids)).delete(synchronize_session=False)
+        db.query(models.Item).filter(models.Item.folder_id.in_(folder_ids)).delete(synchronize_session=False)
+    conn = db.query(models.GoogleConnection).filter(models.GoogleConnection.user_id == user.id).first()
+    if conn:
+        google_calendar.revoke(conn.refresh_token_enc)  # best-effort; never raises
+        google_calendar.forget_access_token(user.id)
+        db.delete(conn)
+    for model in (models.Folder, models.Task, models.Reminder, models.Event, models.StudySession):
+        db.query(model).filter(model.owner_id == user.id).delete(synchronize_session=False)
+
+    now = datetime.utcnow()
+    user.username = f"deleted-{user.id[:8]}"
+    user.name = "Deleted user"
+    user.email = None
+    user.hashed_password = "!"  # not a valid hash — can never match a password
+    user.is_verified = False
+    user.verification_token = None
+    user.verification_expires = None
+    user.reset_token = None
+    user.reset_expires = None
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    user.sessions_invalidated_at = now  # kills every token issued before this moment
+    user.avatar = None
+    user.avatar_updated_at = None
+    user.deleted_at = now
+
+
+@app.post("/me/delete", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("3/minute")
+def delete_account(
+    request: Request,
+    payload: schemas.DeleteAccountRequest,
+    token: str = Depends(auth.oauth2_scheme),
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Deletes the signed-in account. Requires the password again. Failed
+    attempts count toward the normal login lockout, so a stolen token can't be
+    used to brute-force the password here.
+    (POST rather than DELETE-with-a-body: some proxies drop DELETE bodies.)
+    """
+    if auth.is_locked(user):
+        raise HTTPException(status_code=423, detail="Too many failed attempts. Try again later.")
+    if not auth.verify_password(payload.password, user.hashed_password):
+        auth.register_failed_login(user, db)
+        # 403, not 401 — the frontend treats 401 as "session expired" and logs out.
+        raise HTTPException(status_code=403, detail="Incorrect password")
+
+    user_id = user.id
+    _erase_user_data(db, user)
+    db.commit()
+
+    try:
+        auth.revoke_token(token, db)
+    except Exception:
+        # Non-fatal: sessions_invalidated_at already invalidates this token.
+        logger.exception("Could not revoke token after account deletion")
+    logger.info("Account deleted (hard delete in %d days): %s", ACCOUNT_GRACE_DAYS, user_id)
+
+
+@app.get("/me/export")
+@limiter.limit("5/hour")
+def export_my_data(request: Request, user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """A machine-readable (JSON) copy of everything tied to this account."""
+    folders = db.query(models.Folder).filter(models.Folder.owner_id == user.id).all()
+    tasks = db.query(models.Task).filter(models.Task.owner_id == user.id).all()
+    folder_names = {f.id: f.name for f in folders}
+    item_titles = {i.id: i.title for f in folders for i in f.items}
+    reminders = db.query(models.Reminder).filter(models.Reminder.owner_id == user.id).all()
+    events = db.query(models.Event).filter(models.Event.owner_id == user.id).order_by(models.Event.start_time.asc()).all()
+    sessions = db.query(models.StudySession).filter(models.StudySession.owner_id == user.id).order_by(models.StudySession.started_at.asc()).all()
+
+    memberships = db.query(models.GroupMembership).filter(models.GroupMembership.user_id == user.id).all()
+    group_names = {m.group_id: m.group.name for m in memberships}
+    messages = (
+        db.query(models.GroupMessage)
+        .filter(models.GroupMessage.sender_id == user.id)
+        .order_by(models.GroupMessage.created_at.asc())
+        .all()
+    )
+
+    data = {
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "format_version": 1,
+        "account": {
+            "username": user.username,
+            "name": user.name,
+            "email": user.email,
+            "email_verified": user.is_verified,
+            "created_at": user.created_at,
+            "accepted_terms_at": user.accepted_terms_at,
+            "profile_picture": avatars.to_data_url(user.avatar) if user.avatar else None,
+        },
+        "folders": [
+            {
+                "name": f.name,
+                "color": f.color,
+                "items": [
+                    {
+                        "title": i.title,
+                        "summary": i.summary,
+                        "tags": [tag for tag in (i.tags or "").split(",") if tag],
+                        "created_at": i.created_at,
+                        "checklist": [{"text": c.text, "done": bool(c.done)} for c in i.checklist],
+                    }
+                    for i in f.items
+                ],
+            }
+            for f in folders
+        ],
+        "tasks": [
+            {
+                "text": t.text, "priority": t.priority, "done": t.done, "due_date": t.due_date,
+                "linked_folder": folder_names.get(t.folder_id), "linked_item": item_titles.get(t.item_id),
+            }
+            for t in tasks
+        ],
+        "reminders": [{"title": r.title, "detail": r.detail, "kind": r.kind} for r in reminders],
+        "events": [
+            {"title": e.title, "description": e.description, "start_time": e.start_time, "end_time": e.end_time, "color": e.color}
+            for e in events
+        ],
+        "study_sessions": [{"started_at": s.started_at, "title": s.title, "minutes": s.minutes, "note": s.note} for s in sessions],
+        "groups": [{"name": m.group.name, "joined_at": m.joined_at} for m in memberships],
+        "group_messages_sent": [
+            {"group": group_names.get(m.group_id, "(group you have left)"), "text": m.text, "sent_at": m.created_at}
+            for m in messages
+        ],
+        **social.export_social_data(db, user.id),
+        "grades": grades_api.export_grades(db, user),
+        "notes": [
+            "Archive items contain the title, summary and tags only; uploaded photos are not stored by Orbit.",
+            "Direct messages are included only if you sent them; messages other people sent you belong to their accounts.",
+            "Group messages sent before Orbit began recording message authorship cannot be reliably attributed and are not included.",
+        ],
+    }
+
+    return JSONResponse(
+        content=jsonable_encoder(data),
+        headers={
+            "Content-Disposition": f'attachment; filename="orbit-export-{user.username}.json"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def purge_deleted_accounts() -> None:
+    """Hard-deletes accounts whose 30-day grace period is over, and old revoked-token rows."""
+    db = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=ACCOUNT_GRACE_DAYS)
+        expired = db.query(models.User).filter(models.User.deleted_at.isnot(None), models.User.deleted_at < cutoff).all()
+        for u in expired:
+            db.delete(u)
+        db.query(models.RevokedToken).filter(models.RevokedToken.expires_at < datetime.utcnow()).delete(synchronize_session=False)
+        db.commit()
+        if expired:
+            logger.info("Purged %d deleted account(s) past the grace period", len(expired))
+    except Exception:
+        db.rollback()
+        logger.exception("purge_deleted_accounts failed")
+    finally:
+        db.close()
+
+
+# Render's free tier sleeps, so there's no reliable background scheduler.
+# Instead: purge on every startup, and at most once per 6 hours on login.
+_last_purge = 0.0
+
+
+def _maybe_purge() -> None:
+    global _last_purge
+    now = time.time()
+    if now - _last_purge < 6 * 3600:
+        return
+    _last_purge = now
+    purge_deleted_accounts()
+
+
+@app.on_event("startup")
+def _purge_on_startup() -> None:
+    global _last_purge
+    _last_purge = time.time()
+    purge_deleted_accounts()
+
+
+# ============================== AI AUTO-TAGGING ==============================
+
+@app.post("/ai/analyze", response_model=schemas.AnalyzeResponse)
+@limiter.limit("15/minute")
+async def analyze_image(request: Request, payload: schemas.AnalyzeRequest, user: models.User = Depends(auth.get_current_user)):
+    """
+    Server-side AI tagging (see ai_providers.py for the supported providers —
+    a free tier such as Google's Gemini works). The image never needs to expose
+    an API key to the browser, and per-user/per-day caps protect the free quota.
+    """
+    if not ai_providers.provider_name():
+        raise HTTPException(status_code=503, detail="AI tagging isn't set up on this server yet. You can still save items manually.")
+
+    # Cap payload size before it goes to the AI provider — a huge image costs
+    # quota and ties up a worker. Base64 is ~4/3 the size of the raw bytes.
+    MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
+    approx_bytes = len(payload.image_base64) * 3 / 4
+    if approx_bytes > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image is too large (max 8MB).")
+
+    folders = [" ".join(str(f).split())[:40] for f in (payload.candidate_folders or [])][:MAX_FOLDERS_PER_USER]
+    folders = [f for f in folders if f] or [d[0] for d in DEFAULT_FOLDERS]
+
+    per_user, total = ai_providers.limits()
+    denied = ai_providers.quota.try_consume(user.id, per_user, total)
+    if denied:
+        raise HTTPException(status_code=429, detail=denied)
+    try:
+        result = await ai_providers.analyze(payload.image_base64, payload.media_type, folders)
+    except ai_providers.AIError as exc:
+        ai_providers.quota.refund(user.id)  # a failed call shouldn't use up the person's daily scans
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+    return schemas.AnalyzeResponse(**result)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+# ============================== CORS (must stay LAST) ==============================
+# Wrap the entire app instead of using app.add_middleware(CORSMiddleware, ...).
+# Starlette's catch-all error layer (ServerErrorMiddleware) sits OUTSIDE any
+# middleware added the normal way, so when a request crashes with an unhandled
+# exception, the 500 response skips CORSMiddleware and goes out with no CORS
+# headers. The browser then hides the real error and reports a generic
+# "Failed to fetch" / CORS failure — which cost us a long debugging session
+# once already. Wrapping the whole app makes CORS the outermost layer, so
+# every response, including crash responses, carries the headers and the
+# frontend can read the actual error. (This is the fix Starlette's docs
+# recommend.) uvicorn imports `main:app`, so reassigning `app` here is what
+# actually gets served.
+app = CORSMiddleware(
+    app=app,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)

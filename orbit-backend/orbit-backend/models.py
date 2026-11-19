@@ -1,0 +1,361 @@
+import uuid
+from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy.orm import deferred, relationship
+
+from database import Base
+
+
+def gen_id() -> str:
+    return str(uuid.uuid4())
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    # The actual login identifier now — always required, unique, lowercase.
+    username = Column(String, unique=True, nullable=False, index=True)
+    # Display name; defaults to the username at signup if not given, so
+    # frontend code can always assume it's populated.
+    name = Column(String, nullable=True)
+    # No longer required at signup — can be added later from Profile
+    # settings. Nullable + unique is fine in Postgres/SQLite: multiple NULLs
+    # don't violate a unique constraint.
+    email = Column(String, unique=True, nullable=True, index=True)
+    hashed_password = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Consent record — a checkbox alone is weak evidence of agreement if
+    # it's ever disputed; a timestamped server-side record is what actually
+    # demonstrates the user affirmatively agreed at signup.
+    accepted_terms_at = Column(DateTime, nullable=True)
+
+    # Email verification — only meaningful once an email is actually linked.
+    is_verified = Column(Boolean, default=False)
+    verification_token = Column(String, nullable=True)
+    verification_expires = Column(DateTime, nullable=True)
+
+    # Password reset
+    reset_token = Column(String, nullable=True)
+    reset_expires = Column(DateTime, nullable=True)
+
+    # Bumped whenever the password changes; any JWT issued before this
+    # timestamp is treated as invalid, even if it hasn't technically
+    # expired yet — otherwise a stolen token would keep working after
+    # the person "secures" their account by resetting the password.
+    sessions_invalidated_at = Column(DateTime, nullable=True)
+
+    # Set when the person deletes their account. The row is anonymized and
+    # their content erased immediately; this timestamp starts the 30-day
+    # grace period after which purge_deleted_accounts() hard-deletes the row.
+    deleted_at = Column(DateTime, nullable=True, index=True)
+
+    # Account lockout after repeated failed logins
+    failed_login_attempts = Column(Integer, default=0)
+    locked_until = Column(DateTime, nullable=True)
+
+    # Profile picture: a small (256px) JPEG made by avatars.process_avatar.
+    # deferred() keeps the image bytes out of the user lookup that runs on every
+    # authenticated request — they're only read when the picture is actually served.
+    avatar = deferred(Column(LargeBinary, nullable=True))
+    avatar_updated_at = Column(DateTime, nullable=True)
+
+    @property
+    def has_avatar(self) -> bool:
+        return self.avatar_updated_at is not None
+
+    @property
+    def avatar_version(self):
+        # Changes whenever the picture does, so browsers/caches know to refetch.
+        return int(self.avatar_updated_at.timestamp()) if self.avatar_updated_at else None
+
+    folders = relationship("Folder", back_populates="owner", cascade="all, delete-orphan")
+    tasks = relationship("Task", back_populates="owner", cascade="all, delete-orphan")
+    reminders = relationship("Reminder", back_populates="owner", cascade="all, delete-orphan")
+    events = relationship("Event", back_populates="owner", cascade="all, delete-orphan")
+    study_sessions = relationship("StudySession", back_populates="owner", cascade="all, delete-orphan")
+
+
+class RevokedToken(Base):
+    """
+    JWTs are stateless by design, so logging out can't normally invalidate a
+    token early — this table is the exception list. On logout we record the
+    token's jti here; get_current_user checks it on every request. Rows can
+    be purged once expires_at is in the past (no cleanup job included here).
+    """
+    __tablename__ = "revoked_tokens"
+
+    jti = Column(String, primary_key=True)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class Folder(Base):
+    __tablename__ = "folders"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    name = Column(String, nullable=False)
+    color = Column(String, default="#00674F")
+    # Key into the frontend's icon set (e.g. "leaf", "atom"); NULL falls back to a default.
+    icon = Column(String, nullable=True)
+    # User-chosen order in the Archive list (ascending).
+    position = Column(Integer, nullable=False, default=0, server_default="0")
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+
+    owner = relationship("User", back_populates="folders")
+    items = relationship("Item", back_populates="folder", cascade="all, delete-orphan")
+
+
+class Item(Base):
+    __tablename__ = "items"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    title = Column(String, nullable=False)
+    summary = Column(Text, default="")
+    tags = Column(String, default="")  # comma-separated
+    folder_id = Column(String, ForeignKey("folders.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    folder = relationship("Folder", back_populates="items")
+    checklist = relationship(
+        "ChecklistEntry", cascade="all, delete-orphan", order_by="ChecklistEntry.position", back_populates="item"
+    )
+
+
+class ChecklistEntry(Base):
+    """A quick check-off line inside an archive item (lighter than a Task: no priority or deadline)."""
+    __tablename__ = "checklist_entries"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    item_id = Column(String, ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    text = Column(String, nullable=False)
+    done = Column(Boolean, default=False, nullable=False)
+    position = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    item = relationship("Item", back_populates="checklist")
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    text = Column(String, nullable=False)
+    priority = Column(String, default="Medium")  # Low | Medium | High
+    done = Column(Boolean, default=False)
+    due_date = Column(String, default="")
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # Optional link to the archive: a whole folder, or one item inside it (then folder_id is that item's folder).
+    folder_id = Column(String, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True, index=True)
+    item_id = Column(String, ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    owner = relationship("User", back_populates="tasks")
+
+
+class Reminder(Base):
+    __tablename__ = "reminders"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    title = Column(String, nullable=False)
+    detail = Column(String, default="")
+    kind = Column(String, default="time")  # time | location | inactivity
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+
+    owner = relationship("User", back_populates="reminders")
+
+
+class GroupMessage(Base):
+    __tablename__ = "group_messages"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    group_id = Column(String, ForeignKey("groups.id"), nullable=False, index=True)
+    sender_name = Column(String, nullable=False)
+    # Who actually sent it (NULL for messages from before this column existed,
+    # and set back to NULL when the sender deletes their account). Lets the
+    # data export find a person's own messages without matching on display name,
+    # which isn't unique.
+    sender_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    text = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    title = Column(String, nullable=False)
+    description = Column(String, default="")
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=True)
+    color = Column(String, default="#5B3FE0")
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # Id of the matching event in the person's Google Calendar (set once it has
+    # been pushed there; NULL if they haven't connected Google or a push failed).
+    google_event_id = Column(String, nullable=True)
+
+    owner = relationship("User", back_populates="events")
+
+    @property
+    def synced_to_google(self) -> bool:
+        return bool(self.google_event_id)
+
+
+class GoogleConnection(Base):
+    """
+    A person's link to their Google Calendar. Only the long-lived refresh token
+    is stored, and only encrypted (see google_calendar.encrypt) — never in plain text.
+    """
+    __tablename__ = "google_connections"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    refresh_token_enc = Column(String, nullable=False)
+    google_email = Column(String, nullable=True)
+    # IANA zone (e.g. "Asia/Manila") that Orbit's wall-clock event times are in.
+    timezone = Column(String, nullable=False, default="UTC")
+    # True once Google rejected the refresh token (revoked / expired) — the
+    # person has to reconnect before anything syncs again.
+    needs_reauth = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class StudySession(Base):
+    """
+    A logged block of study time — either a manual entry or the result of
+    starting/stopping the in-app timer. There's no automatic activity
+    tracking; every session is something the person explicitly logged.
+    """
+    __tablename__ = "study_sessions"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    minutes = Column(Integer, nullable=False)
+    # What was studied ("Calculus", "Chapter 4 review") — lets Insights show where the time goes.
+    title = Column(String, nullable=True)
+    note = Column(String, default="")
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+
+    owner = relationship("User", back_populates="study_sessions")
+
+
+def gen_invite_code() -> str:
+    # Short, readable, still plenty of entropy for a small invite-only group
+    # (not a security boundary on its own — treat it like a shareable link).
+    return uuid.uuid4().hex[:8]
+
+
+class Group(Base):
+    __tablename__ = "groups"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    name = Column(String, nullable=False)
+    invite_code = Column(String, unique=True, nullable=False, default=gen_invite_code, index=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    memberships = relationship("GroupMembership", back_populates="group", cascade="all, delete-orphan")
+
+
+class GroupMembership(Base):
+    __tablename__ = "group_memberships"
+    __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_group_membership"),)
+
+    id = Column(String, primary_key=True, default=gen_id)
+    group_id = Column(String, ForeignKey("groups.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
+    group = relationship("Group", back_populates="memberships")
+    user = relationship("User")
+
+
+# ---------- friends & direct messages ----------
+
+class Friendship(Base):
+    """One row per pair. status 'pending' = requester has asked; 'accepted' = friends.
+    A pair only ever has one row (either direction) — enforced in social.py."""
+    __tablename__ = "friendships"
+    __table_args__ = (UniqueConstraint("requester_id", "addressee_id", name="uq_friendship_pair"),)
+
+    id = Column(String, primary_key=True, default=gen_id)
+    requester_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    addressee_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String, nullable=False, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    responded_at = Column(DateTime, nullable=True)
+
+
+class DirectMessage(Base):
+    __tablename__ = "direct_messages"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    sender_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    recipient_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    text = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    read_at = Column(DateTime, nullable=True)
+
+
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+    __table_args__ = (UniqueConstraint("blocker_id", "blocked_id", name="uq_user_block"),)
+
+    id = Column(String, primary_key=True, default=gen_id)
+    blocker_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    blocked_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------- grades tracker (private to the owner) ----------
+
+class GradeSettings(Base):
+    __tablename__ = "grade_settings"
+
+    user_id = Column(String, ForeignKey("users.id"), primary_key=True)
+    scale = Column(String, nullable=False)  # "1-5" | "5-1" | "gpa4" | "percent"
+    passing_percent = Column(Float, nullable=False, default=75.0)
+    table_json = Column(Text, nullable=True)  # custom conversion table; NULL = the scale's default
+
+
+class GradeSubject(Base):
+    __tablename__ = "grade_subjects"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    units = Column(Float, nullable=False, default=1.0)
+    folder_id = Column(String, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)
+    # A final grade typed in directly (stored as the percent it stands for); overrides the computed one.
+    final_percent = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    categories = relationship("GradeCategory", cascade="all, delete-orphan", back_populates="subject", order_by="GradeCategory.created_at")
+    entries = relationship("GradeEntry", cascade="all, delete-orphan", back_populates="subject", order_by="GradeEntry.created_at")
+
+
+class GradeCategory(Base):
+    __tablename__ = "grade_categories"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    subject_id = Column(String, ForeignKey("grade_subjects.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    weight = Column(Float, nullable=False, default=0.0)  # percent of the subject grade; 0 = unweighted
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    subject = relationship("GradeSubject", back_populates="categories")
+
+
+class GradeEntry(Base):
+    __tablename__ = "grade_entries"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    subject_id = Column(String, ForeignKey("grade_subjects.id", ondelete="CASCADE"), nullable=False, index=True)
+    category_id = Column(String, ForeignKey("grade_categories.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String, nullable=False)
+    score = Column(Float, nullable=False)
+    total = Column(Float, nullable=False)
+    date = Column(String, default="")  # YYYY-MM-DD or ""
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    subject = relationship("GradeSubject", back_populates="entries")
