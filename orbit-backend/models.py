@@ -114,6 +114,7 @@ class Item(Base):
     title = Column(String, nullable=False)
     summary = Column(Text, default="")
     tags = Column(String, default="")  # comma-separated
+    content = Column(Text, default="")  # notes / transcribed text; what the study AI reads
     folder_id = Column(String, ForeignKey("folders.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -11,11 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 
+import ai_api
 import ai_providers
 import grades_api
 import auth
@@ -23,6 +23,7 @@ import avatars
 import google_calendar
 import models
 import schemas
+import security
 import social
 from database import Base, SessionLocal, engine, get_db
 from logging_config import logger
@@ -49,7 +50,14 @@ app = FastAPI(title="Orbit API", version="1.0.0")
 # In-memory by default (fine for one process); set REDIS_URL once you run
 # more than one server instance, or limits won't be shared across them.
 _redis_url = os.environ.get("REDIS_URL")
-limiter = Limiter(key_func=get_remote_address, storage_uri=_redis_url or "memory://")
+def _rate_limit_key(request: Request) -> str:
+    ip = security.client_ip(request.headers, request.client.host if request.client else None)
+    if os.environ.get("ORBIT_LOG_CLIENT_IP") == "1":  # one-off check that ORBIT_PROXY_HOPS is right; turn off afterwards
+        logger.info("client-ip check: used=%s socket=%s xff=%r", ip, request.client.host if request.client else None, request.headers.get("x-forwarded-for"))
+    return ip
+
+
+limiter = Limiter(key_func=_rate_limit_key, storage_uri=_redis_url or "memory://")
 if not _redis_url:
     logger.info("REDIS_URL not set — rate limiting is in-memory (per process only).")
 app.state.limiter = limiter
@@ -104,6 +112,9 @@ print(f"[orbit] CORS allowed origins (parsed): {allowed_origins!r}")
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
+    # API responses are personal data: never let a browser or shared cache keep them (endpoints that
+    # deliberately cache, like profile pictures, set their own header first).
+    response.headers.setdefault("Cache-Control", "no-store")
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -237,6 +248,8 @@ def login(request: Request, payload: schemas.UserLogin, db: Session = Depends(ge
     generic_error = HTTPException(status_code=401, detail="Incorrect username or password")
 
     if not user or user.deleted_at:
+        # Spend the same time as a real check so response time can't reveal which usernames exist.
+        auth.verify_password(payload.password, auth.DUMMY_HASH)
         raise generic_error
 
     if auth.is_locked(user):
@@ -402,6 +415,7 @@ def _item_out(item: models.Item) -> dict:
         "id": item.id,
         "title": item.title,
         "summary": item.summary,
+        "content": item.content or "",
         "tags": [t for t in item.tags.split(",") if t],
         "created_at": item.created_at,
         "checklist": [{"id": c.id, "text": c.text, "done": bool(c.done)} for c in item.checklist],
@@ -524,10 +538,30 @@ def add_item(folder_id: str, payload: schemas.ItemCreate, db: Session = Depends(
     item = models.Item(
         title=payload.title,
         summary=payload.summary,
+        content=payload.content,
         tags=",".join(payload.tags),
         folder_id=folder.id,
     )
     db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _item_out(item)
+
+
+@app.patch("/items/{item_id}", response_model=schemas.ItemOut)
+def update_item(item_id: str, payload: schemas.ItemUpdate, db: Session = Depends(get_db), user: models.User = Depends(auth.get_current_user)):
+    item = (
+        db.query(models.Item)
+        .join(models.Folder)
+        .filter(models.Item.id == item_id, models.Folder.owner_id == user.id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    data = payload.model_dump(exclude_unset=True)
+    for field in ("title", "summary", "content"):
+        if data.get(field) is not None:
+            setattr(item, field, data[field].strip() if field == "title" else data[field])
     db.commit()
     db.refresh(item)
     return _item_out(item)
@@ -1103,8 +1137,9 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-app.include_router(social.build_router(limiter))
+app.include_router(social.build_router(limiter, allowed_origins))
 app.include_router(grades_api.build_router())
+app.include_router(ai_api.build_router(limiter))
 
 
 @app.websocket("/ws/groups/{group_id}")
@@ -1123,6 +1158,9 @@ async def group_chat_ws(websocket: WebSocket, group_id: str, token: Optional[str
     authenticated user, never from the client message, to prevent identity
     spoofing in the chat.
     """
+    if not security.origin_allowed(websocket.headers.get("origin"), allowed_origins):
+        await websocket.close(code=4403)
+        return
     if not token:
         await websocket.close(code=4401)
         return

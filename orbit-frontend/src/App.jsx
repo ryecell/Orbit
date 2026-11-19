@@ -1163,11 +1163,12 @@ function HomeScreen({ folderList, tasks, go, user }) {
 
       <div style={{ padding: "20px 20px 0" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: T.inkSoft, marginBottom: 10 }}>Quick actions</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
           <QuickAction icon={Camera} label="Camera" tint={T.primary} onClick={() => go("capture")} />
           <QuickAction icon={ListTodo} label="To-Do" tint={T.accent} onClick={() => go("todo")} />
           <QuickAction icon={CalendarIcon} label="Calendar" tint={T.teal} onClick={() => go("calendar")} />
           <QuickAction icon={GraduationCap} label="Grades" tint={T.primary} onClick={() => go("grades")} />
+          <QuickAction icon={Sparkles} label="Study AI" tint={T.accent} onClick={() => go("study")} />
           <QuickAction icon={BarChart3} label="Insights" tint={T.coral} onClick={() => go("insights")} />
         </div>
       </div>
@@ -1505,7 +1506,7 @@ function ItemExtras({ item, tasks, onAddCheck, onToggleCheck, onDeleteCheck, onT
   );
 }
 
-function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, onDelete, tasks = [], onToggleTask, onAddTask, onAddCheck, onToggleCheck, onDeleteCheck }) {
+function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, onDelete, tasks = [], onToggleTask, onAddTask, onAddCheck, onToggleCheck, onDeleteCheck, onUpdateItem }) {
   const [editing, setEditing] = useState(false);
   const meta = folderMeta(folder || { name });
   const Icon = meta.icon;
@@ -1544,6 +1545,7 @@ function FolderDetailScreen({ name, folder, go, back, onDeleteItem, onUpdate, on
               {it.tags.map((tg) => <Chip key={tg} color={meta.color}>{tg}</Chip>)}
             </div>
             <ItemExtras item={it} tasks={tasks.filter((t) => t.item_id === it.id)} onAddCheck={onAddCheck} onToggleCheck={onToggleCheck} onDeleteCheck={onDeleteCheck} onToggleTask={onToggleTask} onAddTask={onAddTask} />
+            <ItemAIPanel item={it} onUpdate={onUpdateItem} onAddTask={onAddTask} />
           </div>
         ))}
         </div>
@@ -1572,6 +1574,7 @@ function CaptureScreen({ back, onSave, folders }) {
   const [folder, setFolder] = useState(folderNames.includes("Personal") ? "Personal" : folderNames[0] || "");
   const [tags, setTags] = useState([]);
   const [summary, setSummary] = useState("");
+  const [content, setContent] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1589,6 +1592,7 @@ function CaptureScreen({ back, onSave, folders }) {
       setFolder(matchFolder(result.folder, folderNames));
       setTags(Array.isArray(result.tags) ? result.tags.slice(0, 5) : []);
       setSummary(result.summary || "");
+      setContent(result.content || "");
       setStatus("ready");
     } catch (err) {
       setError(err.message || "Couldn't analyze this image automatically. You can still fill in the details yourself.");
@@ -1609,7 +1613,7 @@ function CaptureScreen({ back, onSave, folders }) {
     setSaving(true);
     setError("");
     try {
-      await onSave(targetFolder.id, folder, { title: title.trim(), summary, tags });
+      await onSave(targetFolder.id, folder, { title: title.trim(), summary, content, tags });
     } catch (err) {
       setError(err.message || "Couldn't save this item.");
     } finally {
@@ -1669,6 +1673,11 @@ function CaptureScreen({ back, onSave, folders }) {
             <div>
               <FieldLabel>Title</FieldLabel>
               <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Give it a title" style={inputStyle} />
+            </div>
+
+            <div>
+              <FieldLabel>Notes (text from the image — used by quizzes and chat)</FieldLabel>
+              <textarea value={content} maxLength={6000} onChange={(e) => setContent(e.target.value)} rows={4} placeholder="Edit or add notes here" style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
             </div>
 
             <div>
@@ -3797,9 +3806,308 @@ function GradesScreen({ back, folderList, go }) {
   );
 }
 
+/* --------------------------------- STUDY AI --------------------------------- */
+
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function FolderSelect({ folderList, value, onChange, allLabel }) {
+  return (
+    <div style={{ position: "relative" }}>
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={selectStyle}>
+        <option value="">{allLabel}</option>
+        {folderList.map((f) => <option key={f.id} value={f.id}>{f.name} ({f.items.length})</option>)}
+      </select>
+      <ChevronDown size={16} color={T.inkFaint} style={{ position: "absolute", right: 14, top: 14, pointerEvents: "none" }} />
+    </div>
+  );
+}
+
+function SuggestedTasks({ ideas, onAdd }) {
+  const [added, setAdded] = useState({});
+  const [err, setErr] = useState("");
+  async function add(i, t) {
+    setErr("");
+    try { await onAdd(t); setAdded((a) => ({ ...a, [i]: true })); } catch (e) { setErr(e.message || "Couldn't add that task."); }
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <ErrorBanner message={err} />
+      {ideas.map((t, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: T.primarySoft, borderRadius: 12, padding: "9px 11px" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: T.ink, fontWeight: 600, overflowWrap: "anywhere" }}>{t.text}</div>
+            <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 2 }}>{t.priority} priority{t.due_date ? ` · due ${t.due_date}` : ""}</div>
+          </div>
+          <button disabled={!!added[i]} onClick={() => add(i, t)} style={{ ...secondaryBtn, padding: "6px 12px", fontSize: 12.5, opacity: added[i] ? 0.55 : 1 }}>
+            {added[i] ? <><Check size={13} /> Added</> : <><Plus size={13} /> Add</>}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StudyChat({ folderList, refreshStatus }) {
+  const [folder, setFolder] = useState("");
+  const [msgs, setMsgs] = useState([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const endRef = useRef(null);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [msgs, busy]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || busy) return;
+    const history = msgs.slice(-6).map((m) => ({ role: m.role, text: m.text }));
+    setMsgs((m) => [...m, { role: "user", text }]);
+    setInput(""); setBusy(true); setErr("");
+    try {
+      const r = await api.ai.chat({ message: text, history, folder_id: folder || null });
+      setMsgs((m) => [...m, { role: "assistant", text: r.answer, sources: r.sources || [] }]);
+    } catch (e) {
+      setErr(e.message || "The assistant couldn't answer. Please try again.");
+    } finally {
+      setBusy(false); refreshStatus();
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <FolderSelect folderList={folderList} value={folder} onChange={setFolder} allLabel="Ask about all my notes" />
+      {msgs.length === 0 && (
+        <div style={{ ...rowCardStyle, flexDirection: "column", alignItems: "flex-start", gap: 6, fontSize: 13, color: T.inkSoft, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700, color: T.ink }}>Ask your notes anything</div>
+          Try “quiz me on…”, “explain the main idea of my biology notes”, or “what should I review first?”. Answers come from the notes you've saved; add text to an item's Notes to give it more to work with.
+        </div>
+      )}
+      {msgs.map((m, i) => (
+        <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%", background: m.role === "user" ? T.primary : T.panel, color: m.role === "user" ? "#fff" : T.ink, border: m.role === "user" ? "none" : `1px solid ${T.line}`, borderRadius: 16, padding: "10px 13px", fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap", overflowWrap: "anywhere", boxShadow: T.shadow }}>
+          {m.text}
+          {m.sources && m.sources.length > 0 && (
+            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 5 }}>
+              {m.sources.map((s, n) => <span key={s.id} style={{ fontSize: 11, background: T.primarySoft, color: T.primary, borderRadius: 99, padding: "2px 8px", fontWeight: 600 }}>[{n + 1}] {s.title}</span>)}
+            </div>
+          )}
+        </div>
+      ))}
+      {busy && <div style={{ display: "flex", alignItems: "center", gap: 8, color: T.inkSoft, fontSize: 13 }}><OrbitSpinner size={15} color={T.primary} /> Thinking…</div>}
+      <ErrorBanner message={err} />
+      <div ref={endRef} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={input} maxLength={1000} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Ask about your notes…" style={inputStyle} />
+        <button onClick={send} disabled={!input.trim() || busy} aria-label="Send" style={{ ...primaryBtn, padding: "0 16px", opacity: input.trim() && !busy ? 1 : 0.5 }}><Send size={16} /></button>
+      </div>
+    </div>
+  );
+}
+
+function QuizPlayer({ quiz, onDone }) {
+  const cards = quiz.kind === "flashcards";
+  const list = cards ? quiz.cards : quiz.questions;
+  const [i, setI] = useState(0);
+  const [picked, setPicked] = useState(null);
+  const [flipped, setFlipped] = useState(false);
+  const [score, setScore] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const cur = list[i];
+
+  function next() {
+    if (i + 1 >= list.length) { setFinished(true); return; }
+    setI(i + 1); setPicked(null); setFlipped(false);
+  }
+  function pick(n) {
+    if (picked !== null) return;
+    setPicked(n);
+    if (n === cur.answer) setScore((s) => s + 1);
+  }
+
+  if (finished) {
+    return (
+      <div style={{ ...rowCardStyle, flexDirection: "column", gap: 10, textAlign: "center" }}>
+        <div style={{ fontSize: 34 }}>{cards ? "✅" : score === list.length ? "🌟" : "👍"}</div>
+        <div style={{ fontWeight: 800, fontSize: 18, color: T.ink }}>{cards ? `You went through ${list.length} cards` : `${score} / ${list.length} correct`}</div>
+        <button onClick={onDone} style={primaryBtn}>Make another</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>{cards ? "Card" : "Question"} {i + 1} of {list.length}</div>
+      {cards ? (
+        <div onClick={() => setFlipped((f) => !f)} className="orbit-card" style={{ ...rowCardStyle, minHeight: 150, justifyContent: "center", textAlign: "center", cursor: "pointer", flexDirection: "column", gap: 8, background: flipped ? T.primarySoft : T.panel }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: T.inkFaint, textTransform: "uppercase", letterSpacing: 0.6 }}>{flipped ? "Answer" : "Tap to reveal"}</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: T.ink, overflowWrap: "anywhere" }}>{flipped ? cur.back : cur.front}</div>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 15.5, fontWeight: 700, color: T.ink, lineHeight: 1.4 }}>{cur.q}</div>
+          {cur.options.map((o, n) => {
+            const isRight = picked !== null && n === cur.answer;
+            const isWrong = picked === n && n !== cur.answer;
+            return (
+              <button key={n} onClick={() => pick(n)} style={{ textAlign: "left", background: isRight ? T.primarySoft : T.panel, border: `1.5px solid ${isRight ? T.primary : isWrong ? T.danger : T.line}`, borderRadius: 13, padding: "11px 13px", fontSize: 13.5, color: T.ink, cursor: picked === null ? "pointer" : "default", overflowWrap: "anywhere" }}>
+                <b style={{ marginRight: 8, color: T.inkFaint }}>{"ABCD"[n]}</b>{o}
+              </button>
+            );
+          })}
+          {picked !== null && cur.explanation && <div style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>{picked === cur.answer ? "Correct. " : "Not quite. "}{cur.explanation}</div>}
+        </>
+      )}
+      {(cards || picked !== null) && <button onClick={next} style={primaryBtn}>{i + 1 >= list.length ? "Finish" : "Next"}</button>}
+    </div>
+  );
+}
+
+function StudyQuiz({ folderList, refreshStatus }) {
+  const [folder, setFolder] = useState("");
+  const [kind, setKind] = useState("mcq");
+  const [count, setCount] = useState(5);
+  const [quiz, setQuiz] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function make() {
+    setBusy(true); setErr("");
+    try {
+      setQuiz(await api.ai.quiz({ folder_id: folder || null, kind, count }));
+    } catch (e) {
+      setErr(e.message || "Couldn't make a quiz. Please try again.");
+    } finally {
+      setBusy(false); refreshStatus();
+    }
+  }
+  if (quiz) return <QuizPlayer key={JSON.stringify(quiz).length + kind} quiz={quiz} onDone={() => setQuiz(null)} />;
+  const pill = (active) => ({ flex: 1, border: `1px solid ${active ? T.ink : T.line}`, borderRadius: 999, padding: "9px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", background: active ? T.ink : T.panel, color: active ? "#fff" : T.inkSoft });
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div><FieldLabel>Quiz me on</FieldLabel><FolderSelect folderList={folderList} value={folder} onChange={setFolder} allLabel="My newest notes" /></div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={pill(kind === "mcq")} onClick={() => setKind("mcq")}>Multiple choice</button>
+        <button style={pill(kind === "flashcards")} onClick={() => setKind("flashcards")}>Flashcards</button>
+      </div>
+      <div><FieldLabel>How many</FieldLabel>
+        <div style={{ display: "flex", gap: 8 }}>{[3, 5, 8, 10].map((n) => <button key={n} style={pill(count === n)} onClick={() => setCount(n)}>{n}</button>)}</div>
+      </div>
+      <ErrorBanner message={err} />
+      <button onClick={make} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}>
+        {busy ? <><OrbitSpinner size={16} /> Writing questions…</> : <><Sparkles size={16} /> Make my {kind === "mcq" ? "quiz" : "flashcards"}</>}
+      </button>
+      <div style={{ fontSize: 12, color: T.inkFaint, lineHeight: 1.5 }}>Questions only use text saved in your items (their Notes, summary and checklist), so add notes to the items you want to study.</div>
+    </div>
+  );
+}
+
+function StudyPlan({ folderList, onAddTask, refreshStatus }) {
+  const [folder, setFolder] = useState("");
+  const [goal, setGoal] = useState("");
+  const [ideas, setIdeas] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function suggest() {
+    setBusy(true); setErr("");
+    try {
+      const r = await api.ai.suggestTasks({ folder_id: folder || null, goal: goal.trim(), today: localToday() });
+      setIdeas(r.tasks || []);
+    } catch (e) {
+      setIdeas(null); setErr(e.message || "Couldn't suggest tasks. Please try again.");
+    } finally {
+      setBusy(false); refreshStatus();
+    }
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div><FieldLabel>Plan around</FieldLabel><FolderSelect folderList={folderList} value={folder} onChange={setFolder} allLabel="My newest notes" /></div>
+      <div><FieldLabel>Your goal (optional)</FieldLabel><input value={goal} maxLength={200} onChange={(e) => setGoal(e.target.value)} placeholder="e.g. Ace the chemistry quiz on Friday" style={inputStyle} /></div>
+      <ErrorBanner message={err} />
+      <button onClick={suggest} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}>
+        {busy ? <><OrbitSpinner size={16} /> Planning…</> : <><Sparkles size={16} /> Suggest tasks</>}
+      </button>
+      {ideas && <SuggestedTasks ideas={ideas} onAdd={(t) => onAddTask(t.text, t.priority, t.due_date)} />}
+      <div style={{ fontSize: 12, color: T.inkFaint, lineHeight: 1.5 }}>Nothing is added until you press Add. Added tasks show up in My Tasks with their priority and deadline.</div>
+    </div>
+  );
+}
+
+function StudyAIScreen({ back, folderList, onAddTask }) {
+  const [tab, setTab] = useState("ask");
+  const [status, setStatus] = useState(null);
+  const refreshStatus = () => { api.ai.status().then(setStatus).catch(() => {}); };
+  useEffect(() => { refreshStatus(); }, []);
+  const tabBtn = (key, label) => (
+    <button key={key} onClick={() => setTab(key)} style={{ flex: 1, border: "none", borderRadius: 11, padding: "9px 6px", fontSize: 13, fontWeight: 700, cursor: "pointer", background: tab === key ? T.panel : "transparent", color: tab === key ? T.primary : T.inkSoft, boxShadow: tab === key ? T.shadow : "none" }}>{label}</button>
+  );
+  const off = status && !status.enabled;
+  return (
+    <div>
+      <TopBar title="Study AI" onBack={back} />
+      <div className="orbit-stagger" style={screenBox}>
+        <div style={{ display: "flex", gap: 4, background: T.primarySoft, borderRadius: 14, padding: 4 }}>
+          {tabBtn("ask", "Ask")}{tabBtn("quiz", "Quiz")}{tabBtn("plan", "Plan")}
+        </div>
+        {status && status.enabled && <div style={{ fontSize: 12, color: T.inkFaint }}>{status.study_left} of {status.study_limit} AI requests left today</div>}
+        {off && <NoticeBanner kind="info" message="AI isn't set up on this server yet, so these tools are switched off." />}
+        {!off && tab === "ask" && <StudyChat folderList={folderList} refreshStatus={refreshStatus} />}
+        {!off && tab === "quiz" && <StudyQuiz folderList={folderList} refreshStatus={refreshStatus} />}
+        {!off && tab === "plan" && <StudyPlan folderList={folderList} onAddTask={onAddTask} refreshStatus={refreshStatus} />}
+      </div>
+    </div>
+  );
+}
+
+// Notes + AI tools on a single archive item (inside its card in a folder).
+function ItemAIPanel({ item, onUpdate, onAddTask }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(item.content || "");
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const [summary, setSummary] = useState(null);
+  const [ideas, setIdeas] = useState(null);
+  const [savedSummary, setSavedSummary] = useState(false);
+  const dirty = draft !== (item.content || "");
+
+  async function saveNotes() {
+    await onUpdate(item.id, { content: draft });
+  }
+  async function run(kind, fn) {
+    setBusy(kind); setErr("");
+    try { if (dirty) await saveNotes(); await fn(); } catch (e) { setErr(e.message || "Something went wrong."); } finally { setBusy(""); }
+  }
+  return (
+    <div style={{ width: "100%" }}>
+      <button onClick={() => setOpen((o) => !o)} style={{ background: T.accentSoft, border: "none", borderRadius: 10, padding: "7px 11px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: "#8A6410", display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left" }}>
+        <Sparkles size={14} />
+        <span style={{ flex: 1 }}>Notes &amp; AI{item.content ? " · has notes" : ""}</span>
+        <ChevronDown size={14} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+          <ErrorBanner message={err} />
+          <textarea value={draft} maxLength={6000} onChange={(e) => setDraft(e.target.value)} rows={5} placeholder="Type or paste the notes for this item. The quiz maker, chat and summaries read this." style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button disabled={!dirty || !!busy} onClick={() => run("save", async () => {})} style={{ ...secondaryBtn, padding: "8px 12px", fontSize: 12.5, opacity: dirty && !busy ? 1 : 0.5 }}>{busy === "save" ? <OrbitSpinner size={14} /> : "Save notes"}</button>
+            <button disabled={!!busy} onClick={() => run("sum", async () => { setSavedSummary(false); setSummary(await api.ai.summarize({ item_id: item.id })); })} style={{ ...secondaryBtn, padding: "8px 12px", fontSize: 12.5 }}>{busy === "sum" ? <OrbitSpinner size={14} /> : <><Sparkles size={13} /> Summarize</>}</button>
+            <button disabled={!!busy} onClick={() => run("ideas", async () => { const r = await api.ai.suggestTasks({ item_ids: [item.id], today: localToday() }); setIdeas(r.tasks || []); })} style={{ ...secondaryBtn, padding: "8px 12px", fontSize: 12.5 }}>{busy === "ideas" ? <OrbitSpinner size={14} /> : <><ListTodo size={13} /> Task ideas</>}</button>
+          </div>
+          {summary && (
+            <div style={{ background: T.primarySoft, borderRadius: 12, padding: "10px 12px", fontSize: 13, color: T.ink, lineHeight: 1.5 }}>
+              <div>{summary.summary}</div>
+              {summary.key_points.length > 0 && <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{summary.key_points.map((p, i) => <li key={i}>{p}</li>)}</ul>}
+              <button disabled={savedSummary} onClick={async () => { try { await onUpdate(item.id, { summary: summary.summary }); setSavedSummary(true); } catch (e) { setErr(e.message || "Couldn't save."); } }} style={{ ...secondaryBtn, padding: "6px 11px", fontSize: 12, marginTop: 8, opacity: savedSummary ? 0.6 : 1 }}>{savedSummary ? "Saved as item summary" : "Use as item summary"}</button>
+            </div>
+          )}
+          {ideas && <SuggestedTasks ideas={ideas} onAdd={(t) => onAddTask(t.text, t.priority, t.due_date, { item_id: item.id })} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const NAV_ITEMS = [
   { key: "home", label: "Home", icon: Home }, { key: "archive", label: "Archive", icon: FolderOpen },
-  { key: "calendar", label: "Calendar", icon: CalendarIcon }, { key: "todo", label: "Tasks", icon: ListTodo }, { key: "grades", label: "Grades", icon: GraduationCap },
+  { key: "calendar", label: "Calendar", icon: CalendarIcon }, { key: "todo", label: "Tasks", icon: ListTodo }, { key: "grades", label: "Grades", icon: GraduationCap }, { key: "study", label: "Study AI", icon: Sparkles },
   { key: "groupslist", label: "Groups", icon: Users }, { key: "messages", label: "Messages", icon: MessageCircle }, { key: "friends", label: "Friends", icon: UserCheck }, { key: "insights", label: "Insights", icon: BarChart3 },
   { key: "reminders", label: "Reminders", icon: Bell }, { key: "profile", label: "Profile", icon: User },
 ];
@@ -4028,6 +4336,11 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
   function patchItem(itemId, fn) {
     setFolderList((prev) => prev.map((f) => (f.items.some((i) => i.id === itemId) ? { ...f, items: f.items.map((i) => (i.id === itemId ? fn(i) : i)) } : f)));
   }
+  async function updateItem(itemId, body) {
+    const saved = await api.items.update(itemId, body);
+    // keep the checklist already on screen; the server copy is authoritative for the text fields
+    patchItem(itemId, (i) => ({ ...i, title: saved.title, summary: saved.summary, content: saved.content }));
+  }
   async function addChecklistLine(itemId, text) {
     const entry = await checklistApi.add(itemId, text);
     patchItem(itemId, (i) => ({ ...i, checklist: [...(i.checklist || []), entry] }));
@@ -4183,7 +4496,7 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
     switch (screen) {
       case "home": return <HomeScreen folderList={folderList} tasks={tasks} go={go} user={user} />;
       case "archive": return <ArchiveScreen folderList={folderList} go={go} onCreate={createFolder} onUpdate={updateFolder} onDelete={deleteFolder} onMove={moveFolder} />;
-      case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} onUpdate={updateFolder} onDelete={deleteFolder} tasks={tasks} onToggleTask={toggleTask} onAddTask={addTask} onAddCheck={addChecklistLine} onToggleCheck={toggleChecklistLine} onDeleteCheck={deleteChecklistLine} />;
+      case "folder": return <FolderDetailScreen name={activeFolder} folder={folders[activeFolder]} go={go} back={() => setScreen("archive")} onDeleteItem={deleteItem} onUpdate={updateFolder} onDelete={deleteFolder} tasks={tasks} onToggleTask={toggleTask} onAddTask={addTask} onAddCheck={addChecklistLine} onToggleCheck={toggleChecklistLine} onDeleteCheck={deleteChecklistLine} onUpdateItem={updateItem} />;
       case "capture": return <CaptureScreen back={() => setScreen("home")} onSave={saveItem} folders={folders} />;
       case "calendar": return <CalendarScreen back={() => setScreen("home")} events={events} onAddEvent={addEvent} onDeleteEvent={deleteEvent} google={google} onConnectGoogle={connectGoogle} onSyncGoogle={syncGoogleNow} />;
       case "todo": return <TodoScreen tasks={tasks} back={() => setScreen("home")} onToggle={toggleTask} onAdd={addTask} onSetPriority={setTaskPriority} onSetDueDate={setTaskDueDate} onDelete={deleteTask} folderList={folderList} onSetLink={setTaskLink} go={go} />;
@@ -4198,6 +4511,8 @@ function MainShell({ user, onLogout, onUserUpdate, pendingJoinCode, onJoinHandle
           : <CenterSpinner label="Loading group…" />;
       case "messages":
         return <MessagesScreen friends={friends} convos={convos} activeId={activeDmId} go={go} subscribe={subscribeDm} onChanged={loadSocial} isDesktop={isDesktop} onOpenFriends={() => go("friends")} requestCount={socialSummary.incoming_requests} />;
+      case "study":
+        return <StudyAIScreen back={() => setScreen("home")} folderList={folderList} onAddTask={addTask} />;
       case "grades":
         return <GradesScreen back={() => setScreen("home")} folderList={folderList} go={go} />;
       case "friends":

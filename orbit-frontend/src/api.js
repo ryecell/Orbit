@@ -73,6 +73,7 @@ export const api = {
 
   items: {
     delete: (id) => request(`/items/${id}`, { method: "DELETE" }),
+    update: (id, payload) => request(`/items/${id}`, { method: "PATCH", body: payload }),
   },
 
   tasks: {
@@ -110,6 +111,11 @@ export const api = {
 
   ai: {
     analyze: (payload) => request("/ai/analyze", { method: "POST", body: payload }),
+    status: () => request("/ai/status"),
+    chat: (payload) => request("/ai/chat", { method: "POST", body: payload }),
+    summarize: (payload) => request("/ai/summarize", { method: "POST", body: payload }),
+    quiz: (payload) => request("/ai/quiz", { method: "POST", body: payload }),
+    suggestTasks: (payload) => request("/ai/suggest-tasks", { method: "POST", body: payload }),
   },
 
   // Token travels as a query param because browsers can't set custom headers

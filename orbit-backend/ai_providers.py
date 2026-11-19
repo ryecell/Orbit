@@ -62,7 +62,8 @@ def build_prompt(folders) -> str:
         '{"title": "short descriptive title, max 6 words", '
         f'"folder": "best matching folder from this list: {", ".join(folders)}", '
         '"tags": ["3 to 5 short lowercase keyword tags"], '
-        '"summary": "one sentence, max 22 words, summarizing the content"}'
+        '"summary": "one sentence, max 22 words, summarizing the content", '
+        '"content": "the readable text in the image transcribed or condensed into plain notes, max 1500 characters; empty string if there is no text"}'
     )
 
 
@@ -105,7 +106,7 @@ def normalize_result(data: dict, folders) -> dict:
 def gemini_request(model: str, image_b64: str, media_type: str, prompt: str) -> dict:
     return {
         "contents": [{"parts": [{"inline_data": {"mime_type": media_type, "data": image_b64}}, {"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": 500, "temperature": 0.2},
+        "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": 1200, "temperature": 0.2},
     }
 
 
@@ -121,7 +122,7 @@ def gemini_text(resp: dict) -> str:
 def openai_request(model: str, image_b64: str, media_type: str, prompt: str) -> dict:
     return {
         "model": model,
-        "max_tokens": 500,
+        "max_tokens": 1200,
         "temperature": 0.2,
         "messages": [{
             "role": "user",
@@ -146,15 +147,23 @@ def openai_text(resp: dict) -> str:
 # ---------- daily usage caps (in-memory; per server process) ----------
 
 class DailyQuota:
-    def __init__(self):
+    @staticmethod
+    def _today() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def __init__(self, noun: str = "AI scans"):
+        self.noun = noun
         self._lock = threading.Lock()
         self._day = None
         self._per_user = {}
         self._total = 0
 
-    @staticmethod
-    def _today() -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    def remaining(self, user_id: str, per_user: int, today: Optional[str] = None) -> int:
+        today = today or self._today()
+        with self._lock:
+            if self._day != today:
+                return per_user
+            return max(0, per_user - self._per_user.get(user_id, 0))
 
     def try_consume(self, user_id: str, per_user: int, total: int, today: Optional[str] = None) -> Optional[str]:
         """Returns None if allowed (and counts it), else a user-facing reason."""
@@ -163,7 +172,7 @@ class DailyQuota:
             if self._day != today:
                 self._day, self._per_user, self._total = today, {}, 0
             if self._per_user.get(user_id, 0) >= per_user:
-                return f"You've used your {per_user} AI scans for today. They reset at midnight UTC — you can still save items manually."
+                return f"You've used your {per_user} {self.noun} for today. They reset at midnight UTC."
             if self._total >= total:
                 return "Orbit's free AI quota is used up for today. Try again tomorrow, or save the item manually."
             self._per_user[user_id] = self._per_user.get(user_id, 0) + 1
@@ -178,6 +187,7 @@ class DailyQuota:
 
 
 quota = DailyQuota()
+text_quota = DailyQuota("AI study requests")
 
 
 def limits(env=None):
@@ -188,6 +198,17 @@ def limits(env=None):
         except (TypeError, ValueError):
             return default
     return _int("AI_DAILY_LIMIT_PER_USER", 10), _int("AI_DAILY_LIMIT_TOTAL", 200)
+
+
+def text_limits(env=None):
+    """Caps for the text features (chat, quiz, summaries, task ideas). Separate from photo scans."""
+    env = os.environ if env is None else env
+    def _int(name, default):
+        try:
+            return max(1, int(env.get(name, default)))
+        except (TypeError, ValueError):
+            return default
+    return _int("AI_TEXT_LIMIT_PER_USER", 40), _int("AI_TEXT_LIMIT_TOTAL", 400)
 
 
 # ---------- the network call ----------
@@ -222,7 +243,7 @@ async def analyze(image_b64: str, media_type: str, folders, env=None) -> dict:
         headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
         body = {
             "model": env.get("ANTHROPIC_MODEL") or ANTHROPIC_DEFAULT_MODEL,
-            "max_tokens": 500,
+            "max_tokens": 1200,
             "messages": [{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
                 {"type": "text", "text": prompt},
@@ -246,4 +267,74 @@ async def analyze(image_b64: str, media_type: str, folders, env=None) -> dict:
         logger.warning("AI provider %s returned %s: %s", name, resp.status_code, resp.text[:300])
         raise AIError("The AI service returned an error. Please try again.")
 
-    return normalize_result(extract_json(extract(resp.json())), folders)
+    data = extract_json(extract(resp.json()))
+    result = normalize_result(data, folders)
+    result["content"] = str(data.get("content") or "").strip()[:6000]
+    return result
+
+
+# ---------- text-only generation (study features) ----------
+
+def gemini_text_request(prompt: str, as_json: bool, max_tokens: int) -> dict:
+    cfg = {"maxOutputTokens": max_tokens, "temperature": 0.4}
+    if as_json:
+        cfg["responseMimeType"] = "application/json"
+    return {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": cfg}
+
+
+def openai_text_request(model: str, prompt: str, as_json: bool, max_tokens: int) -> dict:
+    # No response_format here: not every OpenAI-compatible host supports it; extract_json handles chatter.
+    return {"model": model, "max_tokens": max_tokens, "temperature": 0.4,
+            "messages": [{"role": "user", "content": prompt}]}
+
+
+async def generate(prompt: str, as_json: bool = False, max_tokens: int = 1500, env=None):
+    """
+    One text prompt in, text out (or a parsed dict when as_json). Works with whichever provider
+    is configured. Raises AIError with a message that is safe to show the user.
+    """
+    import httpx
+
+    env = os.environ if env is None else env
+    name = provider_name(env)
+    if name == "gemini":
+        key = env.get("GEMINI_API_KEY")
+        if not key:
+            raise AIError("GEMINI_API_KEY is not set on the server.", 500)
+        model = env.get("GEMINI_MODEL") or GEMINI_DEFAULT_MODEL
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        headers = {"x-goog-api-key": key, "content-type": "application/json"}
+        body, extract = gemini_text_request(prompt, as_json, max_tokens), gemini_text
+    elif name == "openai":
+        key, base, model = env.get("AI_API_KEY"), (env.get("AI_BASE_URL") or "").rstrip("/"), env.get("AI_MODEL")
+        if not (key and base and model):
+            raise AIError("AI_API_KEY, AI_BASE_URL and AI_MODEL must all be set on the server.", 500)
+        url = f"{base}/chat/completions"
+        headers = {"Authorization": f"Bearer {key}", "content-type": "application/json"}
+        body, extract = openai_text_request(model, prompt, as_json, max_tokens), openai_text
+    elif name == "anthropic":
+        key = env.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise AIError("ANTHROPIC_API_KEY is not set on the server.", 500)
+        url = "https://api.anthropic.com/v1/messages"
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        body = {"model": env.get("ANTHROPIC_MODEL") or ANTHROPIC_DEFAULT_MODEL, "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}]}
+        extract = lambda r: "".join(b.get("text", "") for b in r.get("content", []))
+    else:
+        raise AIError("AI is not configured on the server (set AI_PROVIDER and its key).", 503)
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(url, headers=headers, json=body)
+    except httpx.HTTPError:
+        raise AIError("Couldn't reach the AI service. Please try again.")
+    if resp.status_code == 429:
+        raise AIError("The AI service is busy or its free quota is used up. Try again later.", 429)
+    if resp.status_code != 200:
+        from logging_config import logger
+        logger.warning("AI provider %s returned %s: %s", name, resp.status_code, resp.text[:300])
+        raise AIError("The AI service returned an error. Please try again.")
+
+    text = extract(resp.json())
+    return extract_json(text) if as_json else (text or "").strip()

@@ -13,7 +13,7 @@ USERNAME_PATTERN = re.compile(r"^[a-z0-9_.-]+$")
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=30)
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=8, max_length=128)
     name: Optional[str] = None
     email: Optional[EmailStr] = None  # optional at signup — can be linked later from Profile
     accept_terms: bool = False
@@ -42,8 +42,8 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=128)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -81,7 +81,7 @@ class UpdateProfileRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str = Field(min_length=8)
+    new_password: str = Field(min_length=8, max_length=128)
 
     @field_validator("new_password")
     @classmethod
@@ -163,6 +163,7 @@ class ItemOut(BaseModel):
     id: str
     title: str
     summary: str
+    content: str = ""
     tags: List[str]
     created_at: datetime
     checklist: List[ChecklistOut] = []
@@ -174,7 +175,14 @@ class ItemOut(BaseModel):
 class ItemCreate(BaseModel):
     title: str
     summary: str = ""
+    content: str = Field(default="", max_length=6000)
     tags: List[str] = []
+
+
+class ItemUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    summary: Optional[str] = Field(default=None, max_length=600)
+    content: Optional[str] = Field(default=None, max_length=6000)
 
 
 # Keep in sync with FOLDER_ICONS in the frontend's App.jsx.
@@ -467,3 +475,4 @@ class AnalyzeResponse(BaseModel):
     folder: str
     tags: List[str]
     summary: str
+    content: str = ""

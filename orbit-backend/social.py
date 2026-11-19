@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 import auth
 import models
+import security
 from database import SessionLocal, get_db
 
 MAX_DM_LENGTH = 2000
@@ -230,7 +231,7 @@ def _resolve_target(db: Session, me: models.User, user_id: Optional[str], userna
 
 # ---------- router ----------
 
-def build_router(limiter) -> APIRouter:
+def build_router(limiter, allowed_origins=()) -> APIRouter:
     router = APIRouter()
 
     # ----- discovery -----
@@ -587,6 +588,9 @@ def build_router(limiter) -> APIRouter:
         """Personal push channel: new DMs and friend activity. Same token-in-query
         handshake as the group chat socket. The client sends {"type":"ping"} now
         and then; we answer {"type":"pong"}."""
+        if not security.origin_allowed(websocket.headers.get("origin"), allowed_origins):
+            await websocket.close(code=4403)
+            return
         if not token:
             await websocket.close(code=4401)
             return

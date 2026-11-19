@@ -7,10 +7,8 @@ def test_client_ip_default_ignores_forwarded_header():
 
 
 def test_client_ip_counts_from_the_right_so_spoofing_fails():
-    # attacker sends X-Forwarded-For: 1.1.1.1 ; the proxy appends the real address after it
     assert sec.client_ip({"x-forwarded-for": "1.1.1.1, 203.0.113.9"}, "10.0.0.1", hops=1) == "203.0.113.9"
     assert sec.client_ip({"x-forwarded-for": "1.1.1.1, 2.2.2.2, 203.0.113.9"}, "10.0.0.1", hops=1) == "203.0.113.9"
-    # two trusted proxies (CDN then platform)
     assert sec.client_ip({"x-forwarded-for": "9.9.9.9, 203.0.113.9, 172.16.0.5"}, "10.0.0.1", hops=2) == "203.0.113.9"
 
 

@@ -54,6 +54,10 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
+# Verified against when a login names a username that doesn't exist, so that path takes as long as a real one.
+DUMMY_HASH = pwd_context.hash(secrets.token_urlsafe(16))
+
+
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 

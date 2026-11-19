@@ -208,3 +208,14 @@ Known gaps, deliberately left as-is:
 - Configure SMTP so verification emails actually send.
 - Put this behind HTTPS (reverse proxy or platform-provided TLS).
 - Never commit your `ANTHROPIC_API_KEY`, `SMTP_PASSWORD`, or `DATABASE_URL`.
+
+## Study AI and security settings
+
+| Variable | Purpose |
+| --- | --- |
+| `AI_TEXT_LIMIT_PER_USER` | Daily cap per person on chat / quiz / summary / task-idea requests (default 40) |
+| `AI_TEXT_LIMIT_TOTAL` | Daily cap across everyone (default 400) so a free tier can't be drained |
+| `ORBIT_PROXY_HOPS` | Trusted proxies in front of the app, for rate limiting by real client IP (Render: `1`) |
+| `ORBIT_LOG_CLIENT_IP` | Set to `1` briefly to log which IP is used per request, then remove |
+
+Migration `0016` adds `items.content`. Photo scans now also store the text the AI read from the image.
